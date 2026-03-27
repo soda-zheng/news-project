@@ -1,0 +1,31 @@
+1. 必须在文件夹 backend 里启动（不要在上级 demo2 根目录用别的 app.py）
+   cd d:\demo2\backend
+   python app.py
+
+2. 控制台应打印「财懂了 backend」横幅。
+
+3. 浏览器打开：
+   http://127.0.0.1:5000/api/ping
+   若看到 JSON 且 msg 为 caidong-backend，说明后端正确。
+
+4. 再打开：
+   http://127.0.0.1:5000/api/topics/stock-insight
+   应看到 JSON（含 hint），而不是 Not Found 网页。
+
+5. 若 /api/ping 也是 Not Found：5000 上很可能是「别的 Flask / 旧版后端」，不是当前这份代码。
+   必须先看占用 5000 的进程 ID（PID），再结束它，然后从本目录重新启动。
+
+   PowerShell（复制整段执行）：
+
+   Get-NetTCPConnection -LocalPort 5000 -State Listen | Format-Table LocalAddress,LocalPort,OwningProcess -AutoSize
+   Get-Process -Id (Get-NetTCPConnection -LocalPort 5000 -State Listen).OwningProcess
+
+   记下 OwningProcess 列的数字，例如 12345，然后：
+
+   Stop-Process -Id 12345 -Force
+
+   再执行：
+   cd d:\demo2\backend
+   python app.py
+
+   若 Get-Process 显示的不是你期望的 python.exe，说明 5000 被其它软件占用，同样 Stop-Process 后再启动本后端。

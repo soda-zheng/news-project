@@ -1,0 +1,7 @@
+.line {
+  font-size: 24rpx;
+  line-height: 38rpx;
+  color: #344054;
+  margin-bottom: 8rpx;
+}
+

@@ -1,0 +1,51 @@
+<view class="safe">
+  <view class="topbar">
+    <view class="topbar-left">
+      <text class="top-title">智能投研</text>
+      <text class="top-sub">AI 股票研判</text>
+    </view>
+    <view class="ai-entry" bindtap="goAiChat">
+      <text class="ai-icon">🤖</text>
+      <text class="ai-txt">AI</text>
+    </view>
+  </view>
+
+  <view class="container">
+    <view class="card">
+      <view class="section-title">今日市场热点</view>
+      <view class="tag-wrap">
+        <text class="tag" wx:for="{{hotTags}}" wx:key="*this">{{item}}</text>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="section-title">涨幅榜 Top10</view>
+      <view class="rank-row" wx:for="{{hotTopicsTop10}}" wx:key="name" bindtap="pickTopic" data-leader="{{item.leader}}">
+        <view class="rank-left">
+          <text class="rank-no">{{index + 1}}</text>
+          <view class="rank-main">
+            <text class="rank-name">{{item.name}}</text>
+            <text class="rank-code muted" wx:if="{{item.leader}}">代码 {{item.leader}}</text>
+          </view>
+        </view>
+        <text class="rank-pct {{item.pct_chg > 0 ? 'up' : (item.pct_chg < 0 ? 'down' : '')}}">
+          {{formatSigned(item.pct_chg)}}%
+        </text>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="section-title">热点新闻</view>
+      <view class="news-row" wx:for="{{featuredNews}}" wx:key="id">
+        <text class="news-title">{{item.title}}</text>
+        <view class="news-meta muted">
+          <text class="news-cat">{{item.category || '市场关注'}}</text>
+          <text> · </text>
+          <text class="news-sum">{{item.summary}}</text>
+        </view>
+      </view>
+    </view>
+
+  </view>
+</view>
+
