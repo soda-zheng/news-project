@@ -1,0 +1,95 @@
+page {
+  min-height: 100vh;
+  background: #f7f8fa;
+}
+
+.start-page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 0 12rpx calc(env(safe-area-inset-bottom) + 44rpx);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.status-space {
+  height: calc(env(safe-area-inset-top) + 30rpx);
+}
+
+.hero {
+  margin-top: 126rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.logo-image {
+  width: 440rpx;
+  margin-bottom: 22rpx;
+}
+
+.hello {
+  margin-top: 44rpx;
+  font-size: 60rpx;
+  font-weight: 600;
+  line-height: 1.28;
+  color: #1a1a1a;
+}
+
+.title {
+  margin-top: 120rpx;
+  font-size: 78rpx;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #0f172a;
+}
+
+.subtitle {
+  margin-top: 18rpx;
+  font-size: 32rpx;
+  color: #5f6b7a;
+}
+
+.actions {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  transform: translateY(-28rpx);
+}
+
+.primary-btn {
+  width: 726rpx !important;
+  max-width: 100%;
+  height: 128rpx;
+  line-height: 128rpx;
+  margin: 0 auto;
+  padding: 0;
+  display: block;
+  text-align: center;
+  border-radius: 72rpx;
+  border: 0;
+  background: #0f2f73;
+  color: #ffffff;
+  font-size: 50rpx;
+  font-weight: 700;
+  box-shadow: 0 10rpx 24rpx rgba(15, 47, 115, 0.24);
+}
+
+.login-row {
+  margin-top: 28rpx;
+  margin-bottom: 4rpx;
+  text-align: center;
+  font-size: 36rpx;
+}
+
+.login-tip {
+  color: #6b7280;
+}
+
+.login-link {
+  margin-left: 12rpx;
+  color: #111827;
+  font-size: 36rpx;
+  font-weight: 600;
+}

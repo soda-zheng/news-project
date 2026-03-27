@@ -25,8 +25,10 @@ Page({
     this.setData({ loading: true, errorText: '' })
     try {
       const [hotRes, newsRes] = await Promise.all([getHotTopics(10), getHomeNews(1, 6)])
-      const nextHot = hotRes && hotRes.code === 200 ? (hotRes.data?.items || []).slice(0, 10) : hotTopicsTop10
-      const nextNews = newsRes && newsRes.code === 200 ? (newsRes.data?.featured || []).slice(0, 3) : featuredNews
+      const hotItems = hotRes && hotRes.data && hotRes.data.items ? hotRes.data.items : []
+      const featuredItems = newsRes && newsRes.data && newsRes.data.featured ? newsRes.data.featured : []
+      const nextHot = hotRes && hotRes.code === 200 ? hotItems.slice(0, 10) : hotTopicsTop10
+      const nextNews = newsRes && newsRes.code === 200 ? featuredItems.slice(0, 3) : featuredNews
       this.setData({
         hotTopicsTop10: nextHot.length ? nextHot : hotTopicsTop10,
         featuredNews: nextNews.length ? nextNews : featuredNews

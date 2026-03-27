@@ -9,6 +9,18 @@
 
   <view class="container">
     <view class="card">
+      <view class="section-title">微信账号</view>
+      <view class="user-box" wx:if="{{userInfo}}">
+        <image class="avatar" src="{{userInfo.avatarUrl}}" mode="aspectFill"></image>
+        <view class="user-meta">
+          <text class="user-name">{{userInfo.nickName}}</text>
+          <text class="user-sub muted">已使用微信登录</text>
+        </view>
+      </view>
+      <view class="line muted" wx:else>未登录，请从启动页点击“登录”</view>
+    </view>
+
+    <view class="card">
       <view class="section-title">快捷入口</view>
       <view class="menu-row" wx:for="{{profileMenus}}" wx:key="*this" bindtap="tapMenu" data-name="{{item}}">
         <text class="menu-name">{{item}}</text>

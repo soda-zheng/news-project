@@ -1,3 +1,32 @@
+.user-box {
+  display: flex;
+  align-items: center;
+}
+
+.avatar {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  background: #eef2ff;
+}
+
+.user-meta {
+  margin-left: 20rpx;
+  display: flex;
+  flex-direction: column;
+}
+
+.user-name {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #101828;
+}
+
+.user-sub {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+}
+
 .menu-row {
   padding: 16rpx 0;
   border-bottom: 2rpx solid #EEF2F6;

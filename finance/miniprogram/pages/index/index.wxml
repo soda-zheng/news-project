@@ -1,0 +1,18 @@
+<view class="start-page">
+  <view class="status-space"></view>
+
+  <view class="hero">
+    <image class="logo-image" src="/assets/logo.png" mode="widthFix"></image>
+    <text class="hello">你好，投资者</text>
+    <text class="title">财懂了</text>
+    <text class="subtitle">你的AI股票分析伙伴</text>
+  </view>
+
+  <view class="actions">
+    <view class="primary-btn" bindtap="onStartTap">开始使用</view>
+    <view class="login-row">
+      <text class="login-tip">已有账户？</text>
+      <text class="login-link">登录</text>
+    </view>
+  </view>
+</view>
