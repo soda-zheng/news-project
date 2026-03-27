@@ -1,0 +1,9 @@
+<view class="safe">
+  <view class="topbar">
+    <view class="topbar-left">
+      <text class="top-title">新闻原文</text>
+      <text class="top-sub">来源页面</text>
+    </view>
+  </view>
+  <web-view src="{{url}}" />
+</view>

@@ -31,14 +31,14 @@
           </view>
         </view>
         <text class="rank-pct {{item.pct_chg > 0 ? 'up' : (item.pct_chg < 0 ? 'down' : '')}}">
-          {{formatSigned(item.pct_chg)}}%
+          {{item.pct_chg > 0 ? '+' : ''}}{{item.pct_chg}}%
         </text>
       </view>
     </view>
 
     <view class="card">
       <view class="section-title">热点新闻</view>
-      <view class="news-row" wx:for="{{featuredNews}}" wx:key="id">
+      <view class="news-row" wx:for="{{featuredNews}}" wx:key="id" bindtap="openNews" data-url="{{item.url}}">
         <text class="news-title">{{item.title}}</text>
         <view class="news-meta muted">
           <text class="news-cat">{{item.category || '市场关注'}}</text>

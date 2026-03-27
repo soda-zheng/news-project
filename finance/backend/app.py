@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import json
 import os
+import re
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 from flask import Flask, jsonify, request
+import requests
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
+SESSION = requests.Session()
+SESSION.headers.update(
+    {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://finance.sina.com.cn",
+    }
+)
 
 
 def _now_str() -> str:
@@ -27,93 +38,213 @@ def _parse_symbol(raw: str) -> str:
     return s
 
 
-STOCKS = {
-    "300750": {
-        "symbol": "sz300750",
-        "name": "宁德时代",
-        "price": 156.82,
-        "open": 154.10,
-        "prev_close": 153.28,
-        "high": 157.50,
-        "low": 152.60,
-        "pct_chg": 2.31,
-        "chg": 3.54,
-    },
-    "600519": {
-        "symbol": "sh600519",
-        "name": "贵州茅台",
-        "price": 1720.00,
-        "open": 1699.00,
-        "prev_close": 1695.42,
-        "high": 1728.00,
-        "low": 1695.00,
-        "pct_chg": 1.45,
-        "chg": 24.58,
-    },
-    "002594": {
-        "symbol": "sz002594",
-        "name": "比亚迪",
-        "price": 238.50,
-        "open": 241.20,
-        "prev_close": 240.24,
-        "high": 242.30,
-        "low": 237.10,
-        "pct_chg": -0.72,
-        "chg": -1.74,
-    },
-}
+def _sina_symbol(code: str) -> str:
+    c = _parse_symbol(code)
+    if len(c) != 6 or not c.isdigit():
+        return c
+    if c.startswith(("6", "9")):
+        return f"sh{c}"
+    if c.startswith("8"):
+        return f"bj{c}"
+    return f"sz{c}"
 
-HOT_ITEMS = [
-    {"name": "动力电池", "leader": "300750", "pct_chg": 9.8},
-    {"name": "汽车零部件", "leader": "002594", "pct_chg": 8.91},
-    {"name": "白酒龙头", "leader": "600519", "pct_chg": 6.42},
-    {"name": "AI算力", "leader": "300308", "pct_chg": 5.88},
-    {"name": "机器人", "leader": "300024", "pct_chg": 5.41},
-    {"name": "半导体", "leader": "688981", "pct_chg": 4.99},
-    {"name": "储能", "leader": "300274", "pct_chg": 4.72},
-    {"name": "消费电子", "leader": "300136", "pct_chg": 4.37},
-    {"name": "高端制造", "leader": "600031", "pct_chg": 4.06},
-    {"name": "中特估", "leader": "601668", "pct_chg": 3.84},
-]
 
-NEWS_ITEMS = [
-    {
-        "id": "n1",
-        "title": "新能源产业链景气延续，机构关注盈利修复",
-        "summary": "关注上游原材料波动与下游需求弹性。",
-        "source": "市场快讯",
-        "category": "市场快讯",
-        "ctime": 0,
-        "picUrl": "",
-        "url": "",
-        "importance": 62,
-        "score": 0.82,
-    },
-    {
-        "id": "n2",
-        "title": "白酒板块出现修复，龙头成交额提升",
-        "summary": "旺季预期与估值修复共同驱动。",
-        "source": "财联观察",
-        "category": "财联观察",
-        "ctime": 0,
-        "picUrl": "",
-        "url": "",
-        "importance": 58,
-        "score": 0.76,
-    },
-    {
-        "id": "n3",
-        "title": "政策端再提科技创新，硬科技方向活跃",
-        "summary": "聚焦业绩与订单兑现，避免纯概念。",
-        "source": "投研日报",
-        "category": "投研日报",
-        "ctime": 0,
-        "picUrl": "",
-        "url": "",
-        "importance": 64,
-        "score": 0.78,
-    },
-]
+def _to_float(v, default=None):
+    try:
+        if v is None:
+            return default
+        if isinstance(v, (int, float)):
+            return float(v)
+        s = str(v).strip().replace("%", "")
+        if s == "":
+            return default
+        return float(s)
+    except Exception:
+        return default
+
+
+def _parse_sina_var(payload: str) -> list[str]:
+    if not payload or "=" not in payload:
+        return []
+    right = payload.split("=", 1)[1].strip().strip(";").strip()
+    right = right.strip('"')
+    if not right:
+        return []
+    return right.split(",")
+
+
+def _fetch_stock_live(symbol_input: str):
+    symbol = _sina_symbol(symbol_input)
+    if not symbol:
+        return None
+    url = f"https://hq.sinajs.cn/list={symbol}"
+    resp = SESSION.get(url, timeout=8)
+    resp.encoding = "gbk"
+    text = resp.text
+    fields = _parse_sina_var(text)
+    if len(fields) < 6:
+        return None
+    name = str(fields[0] or "").strip()
+    open_p = _to_float(fields[1], 0.0) or 0.0
+    prev_close = _to_float(fields[2], 0.0) or 0.0
+    price = _to_float(fields[3], 0.0) or 0.0
+    high = _to_float(fields[4], 0.0) or 0.0
+    low = _to_float(fields[5], 0.0) or 0.0
+    chg = round(price - prev_close, 4) if prev_close else 0.0
+    pct = round((chg / prev_close) * 100, 2) if prev_close else 0.0
+    update_time = _now_str()
+    if len(fields) >= 32:
+        update_time = f"{fields[30]} {fields[31]}".strip()
+    return {
+        "symbol": symbol,
+        "name": name or symbol,
+        "price": round(price, 2),
+        "chg": round(chg, 2),
+        "pct_chg": pct,
+        "open": round(open_p, 2),
+        "prev_close": round(prev_close, 2),
+        "high": round(high, 2),
+        "low": round(low, 2),
+        "update_time": update_time,
+    }
+
+
+def _parse_sina_json_v2(raw: str):
+    s = str(raw or "").strip()
+    if not s:
+        return []
+    fixed = re.sub(r'([{,])\s*([A-Za-z_][A-Za-z0-9_]*)\s*:', r'\1"\2":', s)
+    try:
+        out = json.loads(fixed)
+        return out if isinstance(out, list) else []
+    except Exception:
+        return []
+
+
+def _fetch_hot_node(node: str, num: int = 40):
+    url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
+    resp = SESSION.get(
+        url,
+        params={"page": 1, "num": num, "sort": "changepercent", "asc": 0, "node": node, "_s_r_a": "init"},
+        timeout=10,
+    )
+    rows = _parse_sina_json_v2(resp.text)
+    out = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        name = str(r.get("name") or "").strip()
+        leader = str(r.get("symbol") or "").strip().lower()
+        if not name or not leader:
+            continue
+        pct = _to_float(r.get("changepercent"), None)
+        trade = _to_float(r.get("trade"), 0.0) or 0.0
+        settle = _to_float(r.get("settlement"), None)
+        if trade > 0 and settle and settle > 0:
+            pct = round((trade - settle) / settle * 100, 2)
+        if pct is None:
+            continue
+        out.append({"name": name, "leader": leader[2:] if len(leader) == 8 else leader, "pct_chg": round(float(pct), 2)})
+    return out
+
+
+def _fetch_news_live(page: int = 1, num: int = 20):
+    """
+    新浪滚动新闻开放接口（无需 key）：
+    pageid=155 财经页，lid=1686 财经要闻
+    """
+    url = "https://feed.mix.sina.com.cn/api/roll/get"
+    resp = SESSION.get(
+        url,
+        params={"pageid": 155, "lid": 1686, "num": num, "page": page},
+        timeout=10,
+    )
+    data = resp.json() if resp.text else {}
+    lst = ((data or {}).get("result") or {}).get("data") or []
+    ashare_keywords = [
+        "a股",
+        "沪深",
+        "上证",
+        "深证",
+        "创业板",
+        "北交所",
+        "证监会",
+        "ipo",
+        "并购",
+        "回购",
+        "分红",
+        "财报",
+        "业绩",
+        "券商",
+        "银行",
+        "半导体",
+        "新能源",
+        "ai",
+        "算力",
+        "机器人",
+        "医药",
+        "白酒",
+        "地产",
+        "出口",
+    ]
+    intl_keywords = ["美联储", "非农", "cpi", "pmi", "美元", "美债", "纳指", "道指", "原油", "黄金", "地缘", "关税"]
+    domestic_keywords = ["国务院", "央行", "财政部", "发改委", "工信部", "住建部", "政策", "国常会", "稳增长", "消费", "制造业"]
+    items = []
+    for x in lst:
+        if not isinstance(x, dict):
+            continue
+        nid = str(x.get("oid") or x.get("docid") or x.get("id") or uuid.uuid4().hex[:8])
+        title = str(x.get("title") or "").strip()
+        if not title:
+            continue
+        summary = str(x.get("intro") or x.get("description") or title[:80]).strip()
+        ctime = int(_to_float(x.get("ctime"), 0) or 0)
+        url = str(x.get("url") or "").strip()
+        if not url:
+            url = f"https://search.sina.com.cn/?q={requests.utils.quote(title)}"
+        pic = ""
+        pics = x.get("images") or []
+        if isinstance(pics, list) and pics:
+            first = pics[0]
+            if isinstance(first, dict):
+                pic = str(first.get("u") or first.get("url") or "").strip()
+        source = str(x.get("source") or "新浪财经")
+        content = f"{title} {summary}".lower()
+        score = 0.0
+        score += sum(1.0 for k in ashare_keywords if k in content) * 2.5
+        score += sum(1.0 for k in domestic_keywords if k.lower() in content) * 1.8
+        score += sum(1.0 for k in intl_keywords if k.lower() in content) * 1.6
+        if "人民日报" in source or "新华社" in source or "央视" in source:
+            score += 2.2
+        elif "新浪" in source or "证券时报" in source or "财联社" in source:
+            score += 1.2
+        age_hours = max(0, (time.time() - ctime) / 3600.0) if ctime else 24
+        freshness = max(0.0, 3.0 - age_hours / 8.0)
+        score += freshness
+        if score < 2.5:
+            continue
+        category = "A股相关"
+        if any(k.lower() in content for k in intl_keywords):
+            category = "国际市场"
+        if any(k.lower() in content for k in domestic_keywords):
+            category = "国内宏观"
+        items.append(
+            {
+                "id": nid,
+                "title": title,
+                "summary": summary,
+                "source": source,
+                "category": category,
+                "ctime": ctime,
+                "picUrl": pic,
+                "url": url,
+                "importance": int(min(95, 45 + score * 5)),
+                "score": round(score, 3),
+            }
+        )
+    items.sort(key=lambda x: (x.get("score") or 0, x.get("ctime") or 0), reverse=True)
+    return items
+
 
 _SESSIONS: dict[str, dict] = {}
 _TASKS: dict[str, dict] = {}
@@ -143,13 +274,20 @@ def topics_hot():
     except Exception:
         limit = 10
     limit = max(1, min(100, limit))
-    return jsonify(
-        {
-            "code": 200,
-            "msg": "success",
-            "data": {"items": HOT_ITEMS[:limit], "update_time": _now_str()},
-        }
-    )
+    try:
+        rows = _fetch_hot_node("sh_a", 45) + _fetch_hot_node("sz_a", 45)
+        seen = set()
+        uniq = []
+        for x in rows:
+            key = str(x.get("leader") or "")
+            if key in seen:
+                continue
+            seen.add(key)
+            uniq.append(x)
+        uniq.sort(key=lambda x: _to_float(x.get("pct_chg"), -9999) or -9999, reverse=True)
+        return jsonify({"code": 200, "msg": "success", "data": {"items": uniq[:limit], "update_time": _now_str()}})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"获取热点失败：{e}", "data": None})
 
 
 @app.route("/api/news/home", methods=["GET"])
@@ -161,31 +299,38 @@ def news_home():
         return jsonify({"code": 400, "msg": "参数错误：page/num", "data": None})
     page = max(1, page)
     num = max(1, min(20, num))
-    featured = NEWS_ITEMS[:3]
-    items = (NEWS_ITEMS * 8)[:num]
-    return jsonify(
-        {
-            "code": 200,
-            "msg": "success",
-            "data": {
-                "page": page,
-                "num": num,
-                "update_time": _now_str(),
-                "source": "finance-local",
-                "featured": featured,
-                "items": items,
-            },
-        }
-    )
+    try:
+        items = _fetch_news_live(page=page, num=num)
+        featured = items[:3]
+        remain = items[3:] if len(items) > 3 else []
+        return jsonify(
+            {
+                "code": 200,
+                "msg": "success",
+                "data": {
+                    "page": page,
+                    "num": num,
+                    "update_time": _now_str(),
+                    "source": "sina-roll",
+                    "featured": featured,
+                    "items": remain,
+                },
+            }
+        )
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"获取新闻失败：{e}", "data": None})
 
 
 @app.route("/api/stock", methods=["GET"])
 def stock():
     symbol = _parse_symbol(request.args.get("symbol", ""))
-    item = STOCKS.get(symbol)
-    if not item:
-        return jsonify({"code": 404, "msg": "未找到该股票/代码不支持", "data": None})
-    return jsonify({"code": 200, "msg": "success", "data": {**item, "input_symbol": symbol, "update_time": _now_str()}})
+    try:
+        item = _fetch_stock_live(symbol)
+        if not item:
+            return jsonify({"code": 404, "msg": "未找到该股票/代码不支持", "data": None})
+        return jsonify({"code": 200, "msg": "success", "data": {**item, "input_symbol": symbol}})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"查询失败：{e}", "data": None})
 
 
 @app.route("/api/topics/stock-insight", methods=["POST", "OPTIONS"])
@@ -212,7 +357,13 @@ def research_analyze():
     body = request.get_json(silent=True) or {}
     symbol = _parse_symbol(body.get("symbol") or body.get("leader") or "")
     q = str(body.get("question") or "").strip()
-    stock = STOCKS.get(symbol, {})
+    stock = {}
+    try:
+        live = _fetch_stock_live(symbol)
+        if isinstance(live, dict):
+            stock = live
+    except Exception:
+        stock = {}
     summary = (
         f"基于当前样本，{stock.get('name', symbol or '该标的')}短期以结构性波动为主。"
         "建议优先关注回撤承接与板块强度变化，控制追涨节奏。"

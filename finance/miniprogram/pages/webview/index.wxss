@@ -1,0 +1,3 @@
+.safe {
+  min-height: 100vh;
+}

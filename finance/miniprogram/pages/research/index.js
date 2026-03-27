@@ -1,5 +1,4 @@
 const { stockData, hotTags, hotTopicsTop10, featuredNews } = require('../../utils/data')
-const { formatSigned } = require('../../utils/helpers')
 const { getHotTopics, getHomeNews } = require('../../utils/api')
 const { getSelectedCode, setSelectedCode, normalizeCode } = require('../../utils/state')
 
@@ -51,6 +50,14 @@ Page({
     setSelectedCode(code)
     wx.navigateTo({ url: `/pages/aichat/index?code=${code}` })
   },
-  formatSigned
+  openNews(e) {
+    const rawUrl = String(e.currentTarget.dataset.url || '').trim()
+    if (!rawUrl) {
+      wx.showToast({ title: '该新闻暂无原文链接', icon: 'none' })
+      return
+    }
+    const url = encodeURIComponent(rawUrl)
+    wx.navigateTo({ url: `/pages/webview/index?url=${url}` })
+  }
 })
 

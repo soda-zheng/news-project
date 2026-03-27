@@ -5,7 +5,8 @@
     "pages/aidialog/index",
     "pages/report/index",
     "pages/watchlist/index",
-    "pages/mine/index"
+    "pages/mine/index",
+    "pages/webview/index"
   ],
   "window": {
     "navigationStyle": "custom",
