@@ -1,0 +1,25 @@
+<view class="safe">
+  <view class="topbar">
+    <view class="topbar-left">
+      <text class="top-title">我的自选</text>
+      <text class="top-sub">点击查看分析</text>
+    </view>
+    <text class="pill">{{list.length}} 只</text>
+  </view>
+
+  <view class="container">
+    <view class="card add-watch" bindtap="addTip">+ 添加自选（演示版）</view>
+
+    <view class="watch-item" wx:for="{{list}}" wx:key="code" bindtap="pick" data-code="{{item.code}}">
+      <view>
+        <text class="watch-name">{{item.name}}</text>
+        <text class="watch-code muted">{{item.code}}</text>
+      </view>
+      <view class="watch-right">
+        <text class="watch-price">{{item.price}}</text>
+        <text class="watch-tip muted">{{item.tip}}</text>
+      </view>
+    </view>
+  </view>
+</view>
+
