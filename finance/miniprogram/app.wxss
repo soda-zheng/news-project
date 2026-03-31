@@ -5,6 +5,7 @@
 }
 
 .safe {
+  padding-top: calc(env(safe-area-inset-top) + 8rpx);
   padding-bottom: env(safe-area-inset-bottom);
 }
 
@@ -52,6 +53,7 @@
   border-radius: 22rpx;
   padding: 22rpx;
   margin-bottom: 16rpx;
+  box-shadow: 0 10rpx 30rpx rgba(15, 23, 42, 0.06);
 }
 
 .section-title {

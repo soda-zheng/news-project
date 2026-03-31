@@ -1,3 +1,7 @@
+.safe {
+  padding-top: 80rpx;
+}
+
 .topbar-chat { position: relative; }
 
 .back-btn {

@@ -1,3 +1,50 @@
+.safe {
+  /* 顶部留白：在 WebView 下 safe-area-inset-top 可能为 0 */
+  padding-top: 92rpx;
+}
+
+.topbar {
+  padding: 26rpx 24rpx 10rpx;
+  /* 额外往下挪一段距离，让整排远离刘海和右上角浮层 */
+  margin-top: 32rpx !important;
+}
+
+.top-title {
+  font-size: 46rpx;
+}
+
+.top-sub {
+  margin-top: 6rpx;
+  font-size: 26rpx;
+}
+
+.section-title {
+  font-size: 34rpx;
+}
+
+.rank-name {
+  font-size: 30rpx;
+}
+
+.rank-code {
+  margin-top: 6rpx;
+  font-size: 24rpx;
+}
+
+.rank-pct {
+  font-size: 30rpx;
+}
+
+.news-title {
+  font-size: 30rpx;
+  line-height: 42rpx;
+}
+
+.news-meta {
+  font-size: 26rpx;
+  line-height: 38rpx;
+}
+
 .ai-entry {
   height: 58rpx;
   border-radius: 999rpx;
@@ -13,6 +60,17 @@
   font-size: 22rpx;
   color: #2F54EB;
   font-weight: 700;
+}
+
+/* 让首页内容从 topbar 下方开始，避免压到右侧 AI 图标 */
+.container {
+  padding-top: 44rpx !important;
+}
+
+/* 防止卡片覆盖右侧 AI 图标 */
+.ai-entry {
+  position: relative;
+  z-index: 5;
 }
 
 .rank-row {

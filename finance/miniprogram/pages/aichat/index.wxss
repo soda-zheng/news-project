@@ -1,15 +1,29 @@
+.safe {
+  padding-top: 128rpx;
+}
+
 .back-btn {
-  width: 56rpx;
-  height: 56rpx;
+  width: 48rpx;
+  height: 48rpx;
   border-radius: 14rpx;
   border: 2rpx solid #E4E7EC;
   background: #FFFFFF;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-right: 14rpx;
+  margin-right: 0rpx;
   font-size: 32rpx;
   color: #344054;
+}
+
+/* 让返回箭头紧挨标题：避免使用 space-between 导致中间撑开 */
+.topbar {
+  justify-content: flex-start !important;
+}
+
+/* 将右侧徽标（pill）推到最右侧 */
+.pill {
+  margin-left: auto;
 }
 
 .search-card {

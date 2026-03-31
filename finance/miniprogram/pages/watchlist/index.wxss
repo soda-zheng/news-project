@@ -1,3 +1,7 @@
+.safe {
+  padding-top: 128rpx;
+}
+
 .add-watch {
   text-align: center;
   color: #2F54EB;
