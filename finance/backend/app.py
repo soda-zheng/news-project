@@ -148,6 +148,70 @@ def _fetch_hot_node(node: str, num: int = 40):
     return out
 
 
+def _parse_sina_flash_time(ts: str) -> int:
+    """新浪财经全球快讯时间 -> unix 秒，解析失败则 0。"""
+    s = str(ts or "").strip()
+    if not s:
+        return 0
+    try:
+        return int(time.mktime(time.strptime(s[:19], "%Y-%m-%d %H:%M:%S")))
+    except Exception:
+        pass
+    try:
+        return int(time.mktime(time.strptime(s[:16], "%Y-%m-%d %H:%M")))
+    except Exception:
+        return 0
+
+
+def _fetch_sina_global_flash(limit: int = 20):
+    """
+    新浪财经-全球财经快讯（AkShare: stock_info_global_sina）
+    限量：默认取最近 limit 条（数据源本身约 20 条）。
+    目标页: https://finance.sina.com.cn/7x24
+    """
+    limit = max(1, min(50, int(limit or 20)))
+    try:
+        import akshare as ak
+    except ImportError:
+        return None
+    try:
+        df = ak.stock_info_global_sina()
+    except Exception:
+        return None
+    if df is None or getattr(df, "empty", True):
+        return None
+    cols = list(df.columns)
+    if len(cols) < 2:
+        return None
+    tcol = "时间" if "时间" in cols else cols[0]
+    ccol = "内容" if "内容" in cols else cols[1]
+    base_url = "https://finance.sina.com.cn/7x24"
+    out = []
+    for j, (_, row) in enumerate(df.head(limit).iterrows()):
+        tstr = str(row.get(tcol) or "").strip()
+        content = str(row.get(ccol) or "").strip()
+        if not content:
+            continue
+        ctime = _parse_sina_flash_time(tstr)
+        nid = uuid.uuid5(uuid.NAMESPACE_URL, f"sina-global|{tstr}|{content[:120]}").hex[:16]
+        title = content[:80] + ("…" if len(content) > 80 else "")
+        out.append(
+            {
+                "id": nid,
+                "title": title,
+                "summary": content,
+                "source": "新浪财经",
+                "category": "全球财经快讯",
+                "ctime": ctime,
+                "picUrl": "",
+                "url": base_url,
+                "importance": 90,
+                "score": 100.0 - j * 0.01,
+            }
+        )
+    return out
+
+
 def _fetch_news_live(page: int = 1, num: int = 20):
     """
     新浪滚动新闻开放接口（无需 key）：
@@ -300,6 +364,26 @@ def news_home():
     page = max(1, page)
     num = max(1, min(20, num))
     try:
+        # 优先：新浪财经全球财经快讯（AkShare stock_info_global_sina，约 20 条）
+        sina_global = _fetch_sina_global_flash(limit=20)
+        if sina_global:
+            featured = sina_global[:3]
+            remain = sina_global[3:] if len(sina_global) > 3 else []
+            return jsonify(
+                {
+                    "code": 200,
+                    "msg": "success",
+                    "data": {
+                        "page": page,
+                        "num": num,
+                        "update_time": _now_str(),
+                        "source": "akshare-stock_info_global_sina",
+                        "source_page": "https://finance.sina.com.cn/7x24",
+                        "featured": featured,
+                        "items": remain,
+                    },
+                }
+            )
         items = _fetch_news_live(page=page, num=num)
         featured = items[:3]
         remain = items[3:] if len(items) > 3 else []
@@ -319,6 +403,40 @@ def news_home():
         )
     except Exception as e:
         return jsonify({"code": 500, "msg": f"获取新闻失败：{e}", "data": None})
+
+
+@app.route("/api/news/sina-global", methods=["GET"])
+def news_sina_global():
+    """新浪财经全球快讯原始通道（方便单独联调）。"""
+    try:
+        limit = int(request.args.get("limit", "20") or "20")
+    except Exception:
+        limit = 20
+    limit = max(1, min(50, limit))
+    try:
+        items = _fetch_sina_global_flash(limit=limit)
+        if not items:
+            return jsonify(
+                {
+                    "code": 503,
+                    "msg": "未获取到数据（请确认已安装 akshare：pip install -r requirements.txt，且网络可访问新浪）",
+                    "data": None,
+                }
+            )
+        return jsonify(
+            {
+                "code": 200,
+                "msg": "success",
+                "data": {
+                    "update_time": _now_str(),
+                    "source": "akshare-stock_info_global_sina",
+                    "source_page": "https://finance.sina.com.cn/7x24",
+                    "items": items,
+                },
+            }
+        )
+    except Exception as e:
+        return jsonify({"code": 500, "msg": str(e), "data": None})
 
 
 @app.route("/api/stock", methods=["GET"])

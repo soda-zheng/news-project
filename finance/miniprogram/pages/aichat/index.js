@@ -40,7 +40,7 @@ Page({
       wx.navigateBack({ delta: 1 })
       return
     }
-    wx.switchTab({ url: '/pages/research/index' })
+    wx.reLaunch({ url: '/pages/portal/index' })
   },
   async refreshCurrentAnalysis(code) {
     const c = normalizeCode(code) || this.data.currentCode

@@ -1,0 +1,311 @@
+<view class="app-container {{activePage === 'chat' ? 'app-chat-mode' : ''}}" style="padding-top: {{statusBarHeight}}px;">
+  <view class="page {{activePage === 'home' ? 'active-page' : ''}}">
+    <view class="welcome-section">
+      <view class="hello-text">你好，投资者</view>
+    </view>
+    <view class="ai-chat-entry" bindtap="onAiChatEntry">
+      <view class="ai-chat-entry-left">
+        <view class="ai-chat-icon">🤖</view>
+        <view class="ai-chat-text">
+          <text class="ai-chat-h4">AI 智能助手</text>
+          <text class="ai-chat-p">股票分析 · 一键进入对话</text>
+        </view>
+      </view>
+      <text class="ai-chat-arrow">→</text>
+    </view>
+    <view class="card">
+      <view class="hot-header">
+        <text class="hot-tag">🔥 热点报道</text>
+        <text class="more-link">精选价值资讯 ></text>
+      </view>
+      <view class="news-item" data-newsid="oil" bindtap="onNewsTap">
+        <view class="news-title">美国CFTC密切关注原油期货异常交易，特朗普帖前15分钟现5.8亿空单引发质疑</view>
+        <view class="news-ai-summary">🤖 AI摘要：美国商品期货交易委员会(CFTC)于3月30日宣布正密切关注原油期货市场异常交易。此前3月23日，特朗普在社交媒体发帖前15分钟，市场出现5.8亿美元原油空单，引发内幕交易质疑。监管机构表示将彻查此事，原油市场波动加剧。</view>
+        <view class="news-meta">
+          <text>2026-03-30 08:57</text>
+          <text>来源：新浪财经</text>
+        </view>
+        <view class="stock-chips">
+          <text class="stock-chip">中国石化 600028.SH</text>
+          <text class="stock-chip">中国石油 601857.SH</text>
+        </view>
+      </view>
+      <view class="news-item" data-newsid="soy" bindtap="onNewsTap">
+        <view class="news-title">巴西ANEC：3月大豆出口预期微调至1586万吨，全球供应格局稳定</view>
+        <view class="news-ai-summary">🤖 AI摘要：巴西全国谷物出口商协会(ANEC)于3月31日发布数据显示，将3月大豆出口量预期从1587万吨微调至1586万吨，调整幅度仅0.06%。南美丰产预期下，全球大豆供应保持宽松格局，国内压榨企业成本可控，农产品价格预计维持区间震荡。</view>
+        <view class="news-meta">
+          <text>2026-03-31 01:24</text>
+          <text>来源：百度财经</text>
+        </view>
+        <view class="stock-chips">
+          <text class="stock-chip">北大荒 600598.SH</text>
+          <text class="stock-chip">苏垦农发 601952.SH</text>
+        </view>
+      </view>
+      <view class="news-item" data-newsid="fertilizer" bindtap="onNewsTap">
+        <view class="news-title">中东冲突导致霍尔木兹海峡航运受阻，全球化肥与能源价格攀升</view>
+        <view class="news-ai-summary">🤖 AI摘要：中东地缘冲突升级，霍尔木兹海峡航运受阻，引发市场对能源和化肥供应担忧。全球化肥价格应声上涨，欧洲和北非农业生产成本预计上升。分析认为，拥有磷矿、钾肥资源的国内龙头企业有望受益于价格上涨周期。</view>
+        <view class="news-meta">
+          <text>2026-03-31 20:21</text>
+          <text>来源：新浪财经</text>
+        </view>
+        <view class="stock-chips">
+          <text class="stock-chip">盐湖股份 000792.SZ</text>
+          <text class="stock-chip">云天化 600096.SH</text>
+        </view>
+      </view>
+      <view class="news-item" data-newsid="mixue" bindtap="onNewsTap">
+        <view class="news-title">蜜雪冰城全球门店近60000家，海外业务净增长，幸运咖单店效益持续改善</view>
+        <view class="news-ai-summary">🤖 AI摘要：蜜雪冰城全球门店突破60000家，2026年预期门店增速接近15%，海外业务进入净增长阶段。旗下咖啡品牌幸运咖单店效益持续改善，供应链和数字化能力支撑效率提升。机构认为，多品牌矩阵拓展为长期高质量增长提供坚实基础。</view>
+        <view class="news-meta">
+          <text>2026-04-01 09:00</text>
+          <text>来源：百度财经</text>
+        </view>
+        <view class="stock-chips">
+          <text class="stock-chip">蜜雪集团 02097.HK</text>
+          <text class="stock-chip">古茗 01364.HK</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="page {{activePage === 'topic' ? 'active-page' : ''}}">
+    <view class="topic-nav">
+      <view class="back-btn" bindtap="onBackTopic">←</view>
+      <text class="topic-nav-title">话题精读</text>
+    </view>
+    <block wx:if="{{topicDetail}}">
+      <view class="topic-header">
+        <view class="topic-title">{{topicDetail.title}}</view>
+        <view class="drive-card">
+          <view class="section-label">📌 驱动事件</view>
+          <view class="drive-text">{{topicDetail.drive}}</view>
+        </view>
+        <view class="logic-card">
+          <view class="section-label">💡 投资逻辑</view>
+          <view class="drive-text">{{topicDetail.logic}}</view>
+        </view>
+      </view>
+      <view class="card">
+        <view class="core-title">📊 核心标的</view>
+        <view class="stock-row" wx:for="{{topicDetail.stocks}}" wx:key="code">
+          <view>
+            <text class="stock-name-inline">{{item.name}}</text>
+            <text class="text-small"> {{item.code}}</text>
+          </view>
+          <text class="stock-change {{item.positive ? '' : 'negative'}}">{{item.change}}</text>
+        </view>
+      </view>
+      <view class="news-original">
+        <view class="news-original-title">📰 新闻原文</view>
+        <view class="news-original-content">{{topicDetail.originalNews}}</view>
+      </view>
+    </block>
+  </view>
+
+  <view class="page {{activePage === 'stock' ? 'active-page' : ''}}">
+    <view class="section-title">📈 个股分析</view>
+    <view class="search-box">
+      <input class="search-input" value="{{stockSearchInput}}" placeholder="输入股票代码，如 600519" bindinput="onStockSearchInput" />
+      <view class="search-btn" bindtap="onSearchStock">分析</view>
+    </view>
+    <view class="stock-info-card">
+      <view class="stock-name-row">
+        <text class="stock-name-lg">{{stockName}}</text>
+        <text class="stock-code-lg">{{stockCode}}</text>
+      </view>
+      <view class="price-row">
+        <text class="stock-price-lg">{{stockPrice}}</text>
+        <text class="stock-change-percent {{stockChangePositive ? 'positive' : 'negative'}}">{{stockChange}}</text>
+      </view>
+      <view class="stock-detail">{{stockDetail}}</view>
+    </view>
+    <view class="kline-container">
+      <view class="kline-header">
+        <text class="kline-title">📈 K线走势图</text>
+        <view class="kline-btn" bindtap="onResetKline">最新</view>
+      </view>
+      <view class="kline-canvas-wrap">
+        <view class="kline-bars">
+          <view wx:for="{{klineBars}}" wx:key="index" class="kline-bar {{item.up ? 'up' : 'down'}}" style="height: {{item.hRpx}}rpx;"></view>
+        </view>
+      </view>
+      <view class="kline-tip">以下为演示日线收盘价柱状示意</view>
+    </view>
+    <view class="history-card">
+      <view class="history-title">📊 历史位置</view>
+      <view class="history-grid">
+        <view class="history-item">
+          <view class="history-label">近1年最高</view>
+          <view class="history-value">{{high52w}}</view>
+        </view>
+        <view class="history-item">
+          <view class="history-label">近1年最低</view>
+          <view class="history-value">{{low52w}}</view>
+        </view>
+        <view class="history-item">
+          <view class="history-label">价格分位</view>
+          <view class="history-value">{{percentileText}} <text class="history-sub">{{percentileSub}}</text></view>
+        </view>
+        <view class="history-item">
+          <view class="history-label">趋势状态</view>
+          <view class="history-value">{{trendText}}</view>
+        </view>
+      </view>
+      <view class="text-small hist-vol">近30日波动：<text>{{volText}}</text></view>
+    </view>
+    <view class="ai-insight-card">
+      <view class="insight-title">🤖 AI 智能研判</view>
+      <view class="insight-li" wx:for="{{aiInsightList}}" wx:key="*this">• {{item}}</view>
+    </view>
+    <view class="suggestion-card">
+      <view class="suggestion-title">📌 未持仓 · 操作建议</view>
+      <view class="insight-li" wx:for="{{suggestionList}}" wx:key="*this">• {{item}}</view>
+      <view class="disclaimer">AI研判仅供参考，不构成投资建议</view>
+    </view>
+  </view>
+
+  <view class="page page-chat {{activePage === 'chat' ? 'active-page' : ''}}">
+    <view class="chat-full-page">
+      <view class="chat-full-header">
+        <view class="chat-header-side">
+          <view class="back-btn chat-back" bindtap="onBackChat">←</view>
+        </view>
+        <text class="chat-header-title">AI 智能问答</text>
+        <view class="chat-header-side chat-header-spacer"></view>
+      </view>
+      <scroll-view class="chat-full-messages" scroll-y style="height: {{chatMsgAreaPx}}px;">
+        <view wx:for="{{chatMessages}}" wx:key="index" id="msg-{{index}}" class="message {{item.role === 'user' ? 'user-msg' : 'ai-msg'}}">
+          <view class="bubble" hover-class="bubble-press" hover-stay-time="80">{{item.text}}</view>
+        </view>
+      </scroll-view>
+      <view class="chat-input-wrap">
+        <view class="chat-full-input">
+          <input
+            class="chat-input {{chatInputFocus ? 'chat-input--focus' : ''}}"
+            value="{{chatInput}}"
+            focus="{{chatInputFocus}}"
+            placeholder="输入问题，与AI对话..."
+            placeholder-class="chat-input-ph"
+            bindtap="onChatInputTap"
+            bindinput="onChatInput"
+            bindfocus="onChatInputFocus"
+            bindblur="onChatInputBlur"
+            confirm-type="send"
+            bindconfirm="onSendChat"
+            cursor-spacing="24"
+            adjust-position="{{true}}"
+          />
+          <view
+            class="chat-send-btn"
+            hover-class="chat-send-press"
+            hover-start-time="0"
+            hover-stay-time="200"
+            bindtap="onSendChat"
+          >发送</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="page page-watchlist {{activePage === 'watchlist' ? 'active-page' : ''}}">
+    <view class="watchlist-header-row" style="margin-top: {{watchlistHeaderMarginTopPx}}px;">
+      <view class="section-title watchlist-section-title">⭐ 我的自选股</view>
+      <view
+        class="watchlist-add-btn"
+        hover-class="watchlist-add-btn-press"
+        hover-start-time="0"
+        hover-stay-time="120"
+        bindtap="openWatchlistAdd"
+      >+ 添加</view>
+    </view>
+    <view class="card">
+      <block wx:if="{{watchlistItems.length}}">
+        <view
+          class="watchlist-item"
+          wx:for="{{watchlistItems}}"
+          wx:key="code"
+          data-code="{{item.code}}"
+          bindtap="onWatchItemTap"
+        >
+          <view><text class="wl-strong">{{item.name}}</text><text class="text-small"> {{item.labelCode}}</text></view>
+          <text class="stock-change {{item.positive ? '' : 'negative'}}">{{item.changeStr}}</text>
+        </view>
+      </block>
+      <view wx:else class="watchlist-empty text-small">暂无自选股，点击右上角添加</view>
+    </view>
+    <view wx:if="{{watchlistAddVisible}}" class="watchlist-modal-mask" catchtouchmove="stopBubble" bindtap="closeWatchlistAdd">
+      <view class="watchlist-modal" catchtap="stopBubble">
+        <view class="watchlist-modal-title">添加自选股</view>
+        <input
+          class="watchlist-modal-input"
+          placeholder="输入股票代码，如 600519"
+          placeholder-class="watchlist-modal-ph"
+          value="{{watchlistAddInput}}"
+          bindinput="onWatchlistAddInput"
+          confirm-type="done"
+          bindconfirm="confirmWatchlistAdd"
+          adjust-position="{{true}}"
+        />
+        <view class="watchlist-modal-actions">
+          <view class="watchlist-modal-btn cancel" bindtap="closeWatchlistAdd">取消</view>
+          <view class="watchlist-modal-btn ok" bindtap="confirmWatchlistAdd">确定</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="page {{activePage === 'earnings' ? 'active-page' : ''}}">
+    <view class="section-title">📄 AI 财报分析</view>
+    <view class="upload-area" bindtap="onUploadAreaTap">
+      <view class="upload-icon">📂</view>
+      <view>点击上传财报文件</view>
+      <view class="text-small">支持 PDF（从聊天文件选择）</view>
+    </view>
+    <view wx:if="{{earningsVisible}}" class="analysis-result">
+      <view class="earnings-result-title">🤖 AI 财报解读</view>
+      <view class="earnings-result-body">{{earningsHtml}}</view>
+    </view>
+  </view>
+
+  <view class="page {{activePage === 'mine' ? 'active-page' : ''}}">
+    <view class="section-title mine-title">👤 我的</view>
+    <view class="card">
+      <view class="mine-tip text-small">设置 · 偏好 · 关于</view>
+    </view>
+    <view class="card">
+      <view class="core-title">快捷入口</view>
+      <view class="menu-row" wx:for="{{profileMenus}}" wx:key="*this" bindtap="tapMenu" data-name="{{item}}">
+        <text class="menu-name">{{item}}</text>
+        <text class="menu-arrow muted">›</text>
+      </view>
+    </view>
+    <view class="card">
+      <view class="core-title">说明</view>
+      <view class="text-small line-p">与财懂了主流程一致，更多能力可在各 Tab 中使用。</view>
+    </view>
+  </view>
+
+  <view class="tab-bar" wx:if="{{activePage !== 'chat'}}">
+    <view class="tab-item {{tabSelected === 'home' ? 'active' : ''}}" data-page="home" bindtap="onTabTap">
+      <text class="tab-icon">🏠</text>
+      <text class="tab-text">首页</text>
+    </view>
+    <view class="tab-item {{tabSelected === 'stock' ? 'active' : ''}}" data-page="stock" bindtap="onTabTap">
+      <text class="tab-icon">📊</text>
+      <text class="tab-text">个股分析</text>
+    </view>
+    <view class="tab-item {{tabSelected === 'watchlist' ? 'active' : ''}}" data-page="watchlist" bindtap="onTabTap">
+      <text class="tab-icon">⭐</text>
+      <text class="tab-text">自选</text>
+    </view>
+    <view class="tab-item {{tabSelected === 'earnings' ? 'active' : ''}}" data-page="earnings" bindtap="onTabTap">
+      <text class="tab-icon">📄</text>
+      <text class="tab-text">财报</text>
+    </view>
+    <view class="tab-item {{tabSelected === 'mine' ? 'active' : ''}}" data-page="mine" bindtap="onTabTap">
+      <text class="tab-icon">👤</text>
+      <text class="tab-text">我的</text>
+    </view>
+  </view>
+</view>

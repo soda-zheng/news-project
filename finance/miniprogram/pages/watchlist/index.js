@@ -64,7 +64,7 @@ Page({
   pick(e) {
     const code = normalizeCode(String(e.currentTarget.dataset.code || ''))
     setSelectedCode(code)
-    wx.switchTab({ url: '/pages/research/index' })
+    wx.navigateTo({ url: `/pages/aichat/index?code=${code}` })
   }
 })
 

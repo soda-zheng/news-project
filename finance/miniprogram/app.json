@@ -1,6 +1,7 @@
 {
   "pages": [
     "pages/index/index",
+    "pages/portal/index",
     "pages/research/index",
     "pages/aichat/index",
     "pages/aidialog/index",
@@ -13,18 +14,6 @@
     "navigationStyle": "custom",
     "backgroundTextStyle": "light",
     "backgroundColor": "#F3F5F8"
-  },
-  "tabBar": {
-    "color": "#667085",
-    "selectedColor": "#2F54EB",
-    "backgroundColor": "#FFFFFF",
-    "borderStyle": "white",
-    "list": [
-      { "pagePath": "pages/research/index", "text": "智能投研" },
-      { "pagePath": "pages/report/index", "text": "财报分析" },
-      { "pagePath": "pages/watchlist/index", "text": "自选股" },
-      { "pagePath": "pages/mine/index", "text": "我的" }
-    ]
   }
 }
 

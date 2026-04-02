@@ -111,7 +111,7 @@ Page({
       wx.navigateBack({ delta: 1 })
       return
     }
-    wx.switchTab({ url: '/pages/research/index' })
+    wx.reLaunch({ url: '/pages/portal/index' })
   },
   applyCode(code) {
     const c = normalizeCode(code) || '300750'
