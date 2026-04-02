@@ -3,56 +3,219 @@ const { profileMenus } = require('../../utils/data')
 const topicDataMap = {
   mixue: {
     title: '蜜雪冰城全球门店6万，海外业务净增长',
+    heatPercentile: 72,
     drive:
       '驱动事件：蜜雪冰城全球门店近60000家，2026年预期门店增速接近15%；海外业务进入净增长阶段；幸运咖单店效益持续改善。据新浪财经报道，公司供应链优势持续强化，海外市场拓展加速。',
     logic:
       '投资逻辑：通过全球门店高速扩张、海外市场优化及幸运咖单店效益提升，驱动业绩稳健增长。供应链和数字化能力支撑效率提升，多品牌矩阵拓展产品线，为长期高质量增长提供坚实基础。',
+    causalChain: [
+      { label: '事件', text: '门店数近6万、海外净增长、幸运咖效益改善，供应链与数字化强化。' },
+      { label: '影响路径', text: '规模效应 → 单店模型与采购成本优化 → 利润与增速预期上修。' },
+      { label: '可能受益', text: '供应链龙头、同赛道可比公司、港股新茶饮板块情绪。' },
+      { label: '可能承压', text: '同店增速不及预期、加盟管控与食安舆情、海外汇率与合规成本。' }
+    ],
+    counterRisk: {
+      title: '若情况相反会怎样',
+      points: [
+        '同店销售或门店增速低于指引，估值可能从高增长叙事回落。',
+        '海外拓展与关税、合规成本超预期，压制利润率。',
+        '行业价格战加剧，单店模型恶化。'
+      ]
+    },
+    timeline: [
+      { date: '2026-04-01', title: '门店与增速指引相关报道', tag: '资讯' },
+      { date: '2026-06-30', title: '中期财报（演示：可设财报前提醒）', tag: '财报' },
+      { date: '2026-12-31', title: '年度经营数据盘点', tag: '数据' }
+    ],
     stocks: [
       { name: '古茗', code: '01364.HK', change: '+1.39%', positive: true },
       { name: '蜜雪集团', code: '02097.HK', change: '+0.56%', positive: true }
     ],
     originalNews:
-      '蜜雪冰城全球门店近60000家，2026年预期门店增速接近15%；海外业务进入净增长阶段；幸运咖单店效益持续改善。供应链和数字化能力支撑效率，多品牌矩阵拓展产品线，为长期高质量增长提供坚实基础。来源：百度财经 2026-04-01'
+      '蜜雪冰城全球门店近60000家，2026年预期门店增速接近15%；海外业务进入净增长阶段；幸运咖单店效益持续改善。供应链和数字化能力支撑效率，多品牌矩阵拓展产品线，为长期高质量增长提供坚实基础。来源：百度财经 2026-04-01',
+    riskIfWrong:
+      '若消费走弱或同店下滑超预期，开店增速与单店模型无法同步改善，则当前叙事中的「高质量增长」需下调预期，股价可能先行反应在估值压缩上。'
   },
   oil: {
     title: '原油期货异常交易引监管关注',
+    heatPercentile: 86,
     drive:
       '驱动事件：美国商品期货交易委员会（CFTC）于2026年3月30日宣布正密切关注原油期货市场异常交易，此前3月23日特朗普发帖前15分钟出现5.8亿美元空单引发内幕交易质疑。来源：新浪财经。',
     logic:
       '投资逻辑：能源板块短期波动加剧，监管趋严或影响投机情绪，但供需基本面仍偏紧。关注油气龙头低吸机会，同时警惕政策风险对油价的短期扰动。',
+    causalChain: [
+      { label: '事件', text: 'CFTC 表态关注异常交易；巨额空单时点引发监管与舆情。' },
+      { label: '影响路径', text: '监管介入 → 短期投机资金收敛 → 波动率变化 → 油气链情绪重定价。' },
+      { label: '可能受益', text: '高壁垒一体化炼化、高分红油气龙头（波动中防御属性）。' },
+      { label: '可能承压', text: '高杠杆贸易商、纯投机策略；若调查扩大或引发流动性担忧。' }
+    ],
+    counterRisk: {
+      title: '若情况相反会怎样',
+      points: [
+        '调查落地快、市场解读为「利空出尽」，油价波动反而收窄。',
+        '地缘与供需数据盖过监管叙事，油气股与期货脱敏。',
+        '监管未找到实质违规，事件热度快速消退。'
+      ]
+    },
+    timeline: [
+      { date: '2026-03-23', title: '异常空单时点（媒体报道）', tag: '事件' },
+      { date: '2026-03-30', title: 'CFTC 公开表态', tag: '政策' },
+      { date: '2026-04-15', title: 'EIA 库存与产量（演示）', tag: '宏观' }
+    ],
     stocks: [
       { name: '中国石化', code: '600028.SH', change: '+0.32%', positive: true },
       { name: '中国石油', code: '601857.SH', change: '+0.15%', positive: true }
     ],
     originalNews:
-      '美国商品期货交易委员会（CFTC）于2026年3月30日宣布正密切关注原油期货市场异常交易，此前3月23日特朗普发帖前15分钟出现5.8亿美元空单引发内幕交易质疑。监管机构表示将彻查此事，原油市场波动加剧。来源：新浪财经 2026-03-30'
+      '美国商品期货交易委员会（CFTC）于2026年3月30日宣布正密切关注原油期货市场异常交易，此前3月23日特朗普发帖前15分钟出现5.8亿美元空单引发内幕交易质疑。监管机构表示将彻查此事，原油市场波动加剧。来源：新浪财经 2026-03-30',
+    riskIfWrong:
+      '若调查结论淡化、且地缘与供需未恶化，油价快速回落，则事件驱动逻辑减弱，板块可能重回基本面定价，需防追高回撤。'
   },
   soy: {
     title: '巴西大豆出口预期微调，全球供应稳定',
+    heatPercentile: 44,
     drive:
       '驱动事件：巴西全国谷物出口商协会（ANEC）于03月31日将3月大豆出口量预期从1587万吨微调至1586万吨。来源：百度财经。',
     logic:
       '投资逻辑：南美丰产预期下，大豆价格维持区间震荡，国内压榨企业成本可控。北大荒等种植企业受益于粮价高位，关注农产品加工链成本改善机会。',
+    causalChain: [
+      { label: '事件', text: '巴西出口预期微调，幅度极小，全球供应仍偏宽松。' },
+      { label: '影响路径', text: '供应预期稳定 → 国内压榨利润区间波动 → 种植与加工链分化。' },
+      { label: '可能受益', text: '成本可控的龙头压榨、种植端龙头（粮价韧性）。' },
+      { label: '可能承压', text: '若南美产量上修或需求走弱，豆价下行拖累种植情绪。' }
+    ],
+    counterRisk: {
+      title: '若情况相反会怎样',
+      points: [
+        '后续月度出口连续下调，可能重新引发紧平衡预期。',
+        '国内饲料需求超预期复苏，豆类价格弹性放大。',
+        '天气与物流扰动导致南美发运节奏变化。'
+      ]
+    },
+    timeline: [
+      { date: '2026-03-31', title: 'ANEC 出口预期更新', tag: '数据' },
+      { date: '2026-04-10', title: 'USDA 月报（演示）', tag: '宏观' },
+      { date: '2026-05-01', title: '国内港口到港与库存', tag: '行业' }
+    ],
     stocks: [
       { name: '北大荒', code: '600598.SH', change: '-0.21%', positive: false },
       { name: '苏垦农发', code: '601952.SH', change: '+0.05%', positive: true }
     ],
     originalNews:
-      '巴西全国谷物出口商协会（ANEC）于03月31日将3月大豆出口量预期从1587万吨微调至1586万吨，调整幅度仅0.06%。南美丰产预期下，全球大豆供应保持宽松格局。来源：百度财经 2026-03-31'
+      '巴西全国谷物出口商协会（ANEC）于03月31日将3月大豆出口量预期从1587万吨微调至1586万吨，调整幅度仅0.06%。南美丰产预期下，全球大豆供应保持宽松格局。来源：百度财经 2026-03-31',
+    riskIfWrong:
+      '若南美天气或物流再现扰动、或国内需求骤升，宽松叙事可能逆转，豆类价格上行将挤压下游利润，原逻辑需修正。'
   },
   fertilizer: {
     title: '中东冲突推高全球化肥及能源价格',
+    heatPercentile: 79,
     drive:
       '驱动事件：中东冲突导致霍尔木兹海峡航运受阻，全球化肥与能源价格攀升，推高农业生产成本。来源：新浪财经。',
     logic:
       '投资逻辑：化肥价格上行利好国内拥有磷矿、钾肥资源的龙头企业，同时农产品景气度提升。关注盐湖股份、云天化等资源型企业的业绩弹性。',
+    causalChain: [
+      { label: '事件', text: '地缘冲突 → 航运受阻 → 能源与化肥报价上行。' },
+      { label: '影响路径', text: '全球化肥成本曲线抬升 → 国内资源型企业议价与价差改善。' },
+      { label: '可能受益', text: '钾/磷资源自给率高、一体化化工龙头。' },
+      { label: '可能承压', text: '下游农业利润率受压；若冲突缓和，价格快速回吐。' }
+    ],
+    counterRisk: {
+      title: '若情况相反会怎样',
+      points: [
+        '冲突未升级或航线快速恢复，运价与化肥价回落。',
+        '国内保供政策压制出厂价，业绩弹性低于预期。',
+        '全球农产品需求走弱，化肥需求同步下修。'
+      ]
+    },
+    timeline: [
+      { date: '2026-03-28', title: '霍尔木兹相关报道发酵', tag: '事件' },
+      { date: '2026-03-31', title: '全球化肥现货报价（演示）', tag: '数据' },
+      { date: '2026-04-20', title: '一季报窗口（演示）', tag: '财报' }
+    ],
     stocks: [
       { name: '盐湖股份', code: '000792.SZ', change: '+2.1%', positive: true },
       { name: '云天化', code: '600096.SH', change: '+1.8%', positive: true }
     ],
     originalNews:
-      '中东地缘冲突升级，霍尔木兹海峡航运受阻，引发市场对能源和化肥供应担忧。全球化肥价格应声上涨，欧洲和北非农业生产成本预计上升。来源：新浪财经 2026-03-31'
+      '中东地缘冲突升级，霍尔木兹海峡航运受阻，引发市场对能源和化肥供应担忧。全球化肥价格应声上涨，欧洲和北非农业生产成本预计上升。来源：新浪财经 2026-03-31',
+    riskIfWrong:
+      '若冲突缓和、运力恢复或主要出口国增产，化肥价格回落，则涨价叙事收敛，需重新按供需均衡定价。'
   }
+}
+
+const NARRATIVE_PERCENT_MAP = { oil: 72, soy: 58, fertilizer: 81, mixue: 65 }
+
+const HOME_NEWS_SEED = [
+  {
+    id: 'oil',
+    title: '美国CFTC密切关注原油期货异常交易，特朗普帖前15分钟现5.8亿空单引发质疑',
+    summary:
+      '🤖 AI摘要：美国商品期货交易委员会(CFTC)于3月30日宣布正密切关注原油期货市场异常交易。此前3月23日，特朗普在社交媒体发帖前15分钟，市场出现5.8亿美元原油空单，引发内幕交易质疑。监管机构表示将彻查此事，原油市场波动加剧。',
+    metaTime: '2026-03-30 08:57',
+    metaSource: '来源：新浪财经',
+    chips: ['中国石化 600028.SH', '中国石油 601857.SH']
+  },
+  {
+    id: 'soy',
+    title: '巴西ANEC：3月大豆出口预期微调至1586万吨，全球供应格局稳定',
+    summary:
+      '🤖 AI摘要：巴西全国谷物出口商协会(ANEC)于3月31日发布数据显示，将3月大豆出口量预期从1587万吨微调至1586万吨，调整幅度仅0.06%。南美丰产预期下，全球大豆供应保持宽松格局，国内压榨企业成本可控，农产品价格预计维持区间震荡。',
+    metaTime: '2026-03-31 01:24',
+    metaSource: '来源：百度财经',
+    chips: ['北大荒 600598.SH', '苏垦农发 601952.SH']
+  },
+  {
+    id: 'fertilizer',
+    title: '中东冲突导致霍尔木兹海峡航运受阻，全球化肥与能源价格攀升',
+    summary:
+      '🤖 AI摘要：中东地缘冲突升级，霍尔木兹海峡航运受阻，引发市场对能源和化肥供应担忧。全球化肥价格应声上涨，欧洲和北非农业生产成本预计上升。分析认为，拥有磷矿、钾肥资源的国内龙头企业有望受益于价格上涨周期。',
+    metaTime: '2026-03-31 20:21',
+    metaSource: '来源：新浪财经',
+    chips: ['盐湖股份 000792.SZ', '云天化 600096.SH']
+  },
+  {
+    id: 'mixue',
+    title: '蜜雪冰城全球门店近60000家，海外业务净增长，幸运咖单店效益持续改善',
+    summary:
+      '🤖 AI摘要：蜜雪冰城全球门店突破60000家，2026年预期门店增速接近15%，海外业务进入净增长阶段。旗下咖啡品牌幸运咖单店效益持续改善，供应链和数字化能力支撑效率提升。机构认为，多品牌矩阵拓展为长期高质量增长提供坚实基础。',
+    metaTime: '2026-04-01 09:00',
+    metaSource: '来源：百度财经',
+    chips: ['蜜雪集团 02097.HK', '古茗 01364.HK']
+  }
+]
+
+function buildHomeNewsList() {
+  return HOME_NEWS_SEED.map((row) => {
+    const t = topicDataMap[row.id]
+    const heat = t && typeof t.heatPercentile === 'number' ? t.heatPercentile : 0
+    const narrativePct = NARRATIVE_PERCENT_MAP[row.id] != null ? NARRATIVE_PERCENT_MAP[row.id] : heat
+    return { ...row, heatPercentile: heat, narrativePercent: narrativePct }
+  })
+}
+
+const CHAT_QUICK_CHIPS = [
+  { label: '分位与操作', q: '用三点说明：当前股价与近一年分位的关系，对操作意味着什么？' },
+  { label: '风险与机会', q: '列出与该股相关的两条主要风险与一条机会。' },
+  { label: '与大盘联动', q: '若大盘指数下周急跌，该股历史上通常如何反应？' }
+]
+
+function buildChatReply(userText, stock) {
+  const s = stock
+  const t = String(userText || '')
+  const p = s.percentile
+  if (/分位|位置|操作/.test(t)) {
+    return `【${s.name}】近一年价格分位约 ${p}%（演示数据）。分位偏高时追涨容错低，偏低时更需结合基本面是否恶化；当前趋势「${s.trend}」，波动「${s.volatility}」。${s.insight[0]}`
+  }
+  if (/风险|情景|警惕|不及预期/.test(t)) {
+    return `【${s.name}】可重点关注：① ${s.volatility}波动下仓位节奏；② 行业政策与景气边际；③ ${s.suggestion[0] || '注意业绩与估值匹配。'}（演示回复，接入模型后可细化。）`
+  }
+  if (/同业|对比|优势/.test(t)) {
+    return `【${s.name}】与同业对比（演示）：优势常体现在${s.insight[0]}；风险在于行业竞争与成本。建议用一致口径比较 PE、增速与 ROE。`
+  }
+  if (/大盘|指数|联动|急跌/.test(t)) {
+    return `【${s.name}】与大盘联动为统计意义上的经验描述（演示）。当前分位 ${p}%，若指数急跌，高估值/高波动标的往往回撤更大，需结合您的持仓周期。`
+  }
+  return `【${s.name}】现价约 ¥${s.price}，分位 ${p}%，趋势「${s.trend}」。${s.insight[0]} ${s.insight[1] || ''}`
 }
 
 const stockData = {
@@ -133,11 +296,67 @@ const stockData = {
     volatility: '中高',
     insight: ['钾肥资源稀缺性支撑。', '锂盐业务贡献增量。'],
     suggestion: ['回调后分批关注。', '注意周期波动。']
+  },
+  '600096': {
+    name: '云天化',
+    code: '600096.SH',
+    price: 22.5,
+    change: 1.8,
+    high: 26,
+    low: 18,
+    percentile: 61,
+    trend: '震荡上行',
+    volatility: '中',
+    insight: ['磷化工一体化优势。', '化肥景气与成本管控。'],
+    suggestion: ['关注产品价格与出口政策。', '周期波动下注意仓位。']
+  },
+  '600598': {
+    name: '北大荒',
+    code: '600598.SH',
+    price: 14.2,
+    change: -0.21,
+    high: 15.6,
+    low: 13.1,
+    percentile: 44,
+    trend: '区间震荡',
+    volatility: '中',
+    insight: ['粮价与种植链情绪相关。', '关注农产品价格与政策补贴。'],
+    suggestion: ['波段思路，注意商品波动。']
+  },
+  '601952': {
+    name: '苏垦农发',
+    code: '601952.SH',
+    price: 9.85,
+    change: 0.05,
+    high: 10.4,
+    low: 9.2,
+    percentile: 51,
+    trend: '区间震荡',
+    volatility: '中',
+    insight: ['区域种植与加工一体化。', '成本与粮价双重驱动。'],
+    suggestion: ['适合作为农业主题配置观察。']
   }
 }
 
 const WATCHLIST_STORAGE_KEY = 'portal_watchlist_codes'
 const WATCHLIST_DEFAULT = ['600519', '600028', '02097', '01364']
+const TOPIC_NOTES_KEY = 'portal_topic_notes'
+
+function readTopicNotes() {
+  try {
+    const x = wx.getStorageSync(TOPIC_NOTES_KEY)
+    return x && typeof x === 'object' ? x : {}
+  } catch (e) {
+    return {}
+  }
+}
+
+function formatTopicNoteTime(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  const pad = (n) => (n < 10 ? '0' + n : '' + n)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 function resolveStockKey(raw) {
   const s = String(raw || '').trim().toUpperCase()
@@ -199,16 +418,28 @@ Page({
     klineBars: buildKlineBars(klineSeed),
     chatInput: '',
     chatMessages: [
-      { role: 'ai', text: '您好！我是财懂了AI助手，可以针对当前关注的股票进行深度分析。请问有什么可以帮您？' }
+      {
+        role: 'ai',
+        text: '您好！我是财懂了AI助手。可先点下方场景问题，也可直接输入。我会结合您当前查看的个股与价格分位来答（演示版为模板回复）。'
+      }
     ],
+    chatQuickChips: CHAT_QUICK_CHIPS,
     earningsVisible: false,
     earningsHtml: '',
+    earningsFileName: '',
     chatMsgAreaPx: 520,
     chatInputFocus: false,
     watchlistItems: [],
     watchlistAddVisible: false,
     watchlistAddInput: '',
-    watchlistHeaderMarginTopPx: 0
+    watchlistHeaderMarginTopPx: 0,
+    homeNewsList: buildHomeNewsList(),
+    percentileBarWidth: 62,
+    percentileMarkerLeft: 62,
+    percentileLabel: '62%',
+    currentTopicId: '',
+    topicNoteBody: '',
+    topicNoteSaved: ''
   },
 
   _layoutChatArea() {
@@ -223,7 +454,7 @@ Page({
       const rpx = (n) => (n * winW) / 750
       const headerPx = Math.ceil(rpx(120))
       /* 白底输入区：顶边线 + 内边距 + 胶囊输入/按钮高度 + 安全区（与 wxss 一致） */
-      const inputBarPx = Math.ceil(rpx(220)) + safeBottom
+      const inputBarPx = Math.ceil(rpx(420)) + safeBottom
       const msgH = Math.floor(winH - headerPx - inputBarPx)
       this.setData({ chatMsgAreaPx: Math.max(280, msgH) })
     } catch (e) {
@@ -304,11 +535,77 @@ Page({
     const id = e.currentTarget.dataset.newsid
     const topic = topicDataMap[id]
     if (!topic) return
-    this.setData({ topicDetail: topic, activePage: 'topic' })
+    const notes = readTopicNotes()
+    const n = notes[id]
+    this.setData({
+      topicDetail: { ...topic, topicId: id },
+      currentTopicId: id,
+      topicNoteBody: (n && n.noteText) || '',
+      topicNoteSaved: n && n.savedAt ? formatTopicNoteTime(n.savedAt) : '',
+      activePage: 'topic'
+    })
   },
 
   onBackTopic() {
-    this.setData({ activePage: 'home', topicDetail: null })
+    this.setData({
+      activePage: 'home',
+      topicDetail: null,
+      currentTopicId: '',
+      topicNoteBody: '',
+      topicNoteSaved: ''
+    })
+  },
+
+  onTopicNoteBodyInput(e) {
+    this.setData({ topicNoteBody: e.detail.value })
+  },
+
+  saveTopicTextNote() {
+    const id = this.data.currentTopicId
+    if (!id) return
+    const stock = this.data.currentStock
+    const rec = {
+      noteText: this.data.topicNoteBody || '',
+      savedAt: Date.now(),
+      priceSnapshot: stock ? `${stock.name} ¥${stock.price}` : ''
+    }
+    const all = readTopicNotes()
+    all[id] = { ...all[id], ...rec }
+    try {
+      wx.setStorageSync(TOPIC_NOTES_KEY, all)
+    } catch (err) {}
+    this.setData({ topicNoteSaved: formatTopicNoteTime(rec.savedAt) })
+    wx.showToast({ title: '笔记已保存', icon: 'success' })
+  },
+
+  addTopicToWatchlist() {
+    const id = this.data.currentTopicId
+    const topic = id ? topicDataMap[id] : null
+    if (!topic || !topic.stocks || !topic.stocks.length) return
+    let codes = []
+    try {
+      const saved = wx.getStorageSync(WATCHLIST_STORAGE_KEY)
+      if (Array.isArray(saved) && saved.length) codes = saved.map((c) => String(c).trim()).filter(Boolean)
+    } catch (e) {}
+    if (!codes.length) codes = [...WATCHLIST_DEFAULT]
+    const seen = new Set(codes)
+    let added = 0
+    topic.stocks.forEach((s) => {
+      const key = resolveStockKey(s.code)
+      if (!key || seen.has(key)) return
+      seen.add(key)
+      codes.push(key)
+      added++
+    })
+    if (!added) {
+      wx.showToast({ title: '标的已在清单中', icon: 'none' })
+      return
+    }
+    try {
+      wx.setStorageSync(WATCHLIST_STORAGE_KEY, codes)
+    } catch (e2) {}
+    this.setData({ watchlistItems: buildWatchlistRows(codes) })
+    wx.showToast({ title: `已加入 ${added} 只`, icon: 'success' })
   },
 
   onAiChatEntry() {
@@ -316,7 +613,32 @@ Page({
   },
 
   onBackChat() {
-    this.switchPage('home')
+    this.switchPage('stock')
+  },
+
+  onStockQuickAsk(e) {
+    const q = e.currentTarget.dataset.q
+    if (!q) return
+    this.switchPage('chat')
+    this.setData({ chatInput: q, chatInputFocus: true })
+  },
+
+  onChatChipTap(e) {
+    const q = e.currentTarget.dataset.q
+    if (!q) return
+    this._sendChatWithText(q)
+  },
+
+  _sendChatWithText(raw) {
+    const text = String(raw || '').trim()
+    if (!text) return
+    const cur = this.data.currentStock
+    const msgs = this.data.chatMessages.concat([{ role: 'user', text }])
+    const reply = buildChatReply(text, cur)
+    this.setData({ chatMessages: msgs, chatInput: '' })
+    setTimeout(() => {
+      this.setData({ chatMessages: msgs.concat([{ role: 'ai', text: reply }]) })
+    }, 320)
   },
 
   onStockSearchInput(e) {
@@ -324,8 +646,8 @@ Page({
   },
 
   onSearchStock() {
-    const code = String(this.data.stockSearchInput || '').trim()
-    const s = stockData[code] || stockData['600519']
+    const key = resolveStockKey(this.data.stockSearchInput)
+    const s = (key && stockData[key]) || stockData['600519']
     this.updateStockUI(s)
   },
 
@@ -350,15 +672,7 @@ Page({
   },
 
   onSendChat() {
-    const text = String(this.data.chatInput || '').trim()
-    if (!text) return
-    const cur = this.data.currentStock
-    const msgs = this.data.chatMessages.concat([{ role: 'user', text }])
-    const reply = `关于${cur.name}：当前股价¥${cur.price}，${cur.trend}，价格分位${cur.percentile}%。${cur.insight[0]}`
-    this.setData({ chatMessages: msgs, chatInput: '' })
-    setTimeout(() => {
-      this.setData({ chatMessages: msgs.concat([{ role: 'ai', text: reply }]) })
-    }, 300)
+    this._sendChatWithText(this.data.chatInput)
   },
 
   onWatchItemTap(e) {
@@ -415,7 +729,9 @@ Page({
         const name = f.name || '财报文件'
         this.setData({
           earningsVisible: true,
-          earningsHtml: `📄 分析：${name}\n🤖 AI分析：营业收入+15.8%，净利润+22.3%，毛利率34.2%，综合评级增持。（演示）`
+          earningsFileName: name,
+          earningsHtml:
+            '🤖 综合解读（示例）：收入与利润增速匹配度较好；毛利率处于需同业对照区间；若接入真实解析，将在上表逐项自动勾选并引用报表附注位置。'
         })
       },
       fail: () => {
@@ -446,6 +762,9 @@ Page({
       high52w: `¥${stock.high}`,
       low52w: `¥${stock.low}`,
       percentileText: `${stock.percentile}%`,
+      percentileBarWidth: stock.percentile,
+      percentileMarkerLeft: Math.min(100, Math.max(0, stock.percentile)),
+      percentileLabel: `${stock.percentile}%`,
       percentileSub: stock.percentile > 50 ? '中位偏上' : '中位偏下',
       trendText: stock.trend,
       volText: stock.volatility,

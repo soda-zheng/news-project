@@ -1,0 +1,1578 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>财懂了 - AI股票分析伙伴</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: #F5F7FB;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #1E293B;
+            padding-bottom: 80px;
+        }
+
+        .app-container {
+            max-width: 450px;
+            margin: 0 auto;
+            background: #F5F7FB;
+            min-height: 100vh;
+            position: relative;
+        }
+
+        .page {
+            display: none;
+            padding: 16px;
+            animation: fadeIn 0.25s ease;
+        }
+
+        .active-page {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px);}
+            to { opacity: 1; transform: translateY(0);}
+        }
+
+        .tab-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            max-width: 450px;
+            margin: 0 auto;
+            background: rgba(255,255,255,0.96);
+            backdrop-filter: blur(10px);
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            padding: 10px 20px 20px;
+            border-top: 0.5px solid rgba(0,0,0,0.05);
+            z-index: 20;
+        }
+
+        .tab-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            color: #8E9AAF;
+            transition: 0.2s;
+            cursor: pointer;
+            background: none;
+            border: none;
+            font-weight: 500;
+        }
+
+        .tab-item.active {
+            color: #0f2f73;
+        }
+
+        .tab-icon {
+            font-size: 22px;
+        }
+
+        .card {
+            background: #FFFFFF;
+            border-radius: 24px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+            border: 0.5px solid rgba(0,0,0,0.03);
+        }
+
+        /* 欢迎区域 */
+        .welcome-section {
+            margin-bottom: 20px;
+        }
+        
+        .hello-text {
+            font-size: 28px;
+            font-weight: 700;
+            color: #0f2f73;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, #0f2f73, #1e4a8a);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+        
+        /* AI对话入口卡片 */
+        .ai-chat-entry {
+            background: linear-gradient(135deg, #0f2f73, #1e4a8a);
+            border-radius: 28px;
+            padding: 16px 20px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .ai-chat-entry:active {
+            transform: scale(0.98);
+        }
+        
+        .ai-chat-entry-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .ai-chat-icon {
+            width: 48px;
+            height: 48px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+        
+        .ai-chat-text h4 {
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        
+        .ai-chat-text p {
+            color: rgba(255,255,255,0.8);
+            font-size: 12px;
+        }
+        
+        .ai-chat-arrow {
+            color: white;
+            font-size: 20px;
+        }
+
+        .hot-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 12px;
+        }
+
+        .hot-tag {
+            font-weight: 700;
+            font-size: 18px;
+            background: linear-gradient(135deg, #0f2f73, #1e4a8a);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+
+        .more-link {
+            font-size: 13px;
+            color: #0f2f73;
+        }
+
+        .news-item {
+            padding: 16px 0;
+            border-bottom: 0.5px solid #F0F2F5;
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        .news-item:active {
+            background: #F8FAFE;
+        }
+
+        .news-item:last-child {
+            border-bottom: none;
+        }
+
+        .news-title {
+            font-weight: 600;
+            font-size: 16px;
+            line-height: 1.4;
+            margin-bottom: 8px;
+            color: #1E293B;
+        }
+
+        .news-ai-summary {
+            font-size: 13px;
+            color: #64748B;
+            line-height: 1.5;
+            margin-bottom: 10px;
+            background: #F8FAFE;
+            padding: 10px 12px;
+            border-radius: 16px;
+            border-left: 3px solid #0f2f73;
+        }
+
+        .news-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #9AA6B9;
+            margin-bottom: 8px;
+        }
+
+        .stock-chips {
+            margin-top: 8px;
+        }
+
+        .stock-chip {
+            background: #F1F5F9;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            display: inline-block;
+            margin-right: 8px;
+            margin-top: 4px;
+            color: #0f2f73;
+        }
+
+        .text-small {
+            font-size: 12px;
+            color: #64748B;
+        }
+
+        .flex-between {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .back-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px;
+            color: #0f2f73;
+        }
+
+        .section-title {
+            font-weight: 600;
+            font-size: 18px;
+            margin: 8px 0 12px 0;
+            color: #0f2f73;
+        }
+
+        .watchlist-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 0;
+            border-bottom: 0.5px solid #EDF2F7;
+            cursor: pointer;
+        }
+
+        .stock-change {
+            font-weight: 600;
+            color: #0f2f73;
+        }
+
+        .stock-change.negative {
+            color: #E53E3E;
+        }
+
+        /* 话题详情页样式 */
+        .topic-header {
+            margin-bottom: 16px;
+        }
+
+        .topic-title {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #0f2f73;
+        }
+
+        .drive-card {
+            background: #F0F4FA;
+            padding: 16px;
+            border-radius: 20px;
+            margin: 12px 0;
+            border-left: 4px solid #0f2f73;
+        }
+
+        .logic-card {
+            background: #F8FAFE;
+            padding: 16px;
+            border-radius: 20px;
+            margin: 12px 0;
+            border-left: 4px solid #1e4a8a;
+        }
+
+        .section-label {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 8px;
+            color: #0f2f73;
+        }
+
+        .drive-text {
+            font-size: 14px;
+            color: #334155;
+            line-height: 1.5;
+        }
+
+        .stock-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 0;
+            border-bottom: 0.5px solid #EDF2F7;
+        }
+
+        .stock-row:last-child {
+            border-bottom: none;
+        }
+        
+        .news-original {
+            background: #F8FAFE;
+            padding: 16px;
+            border-radius: 20px;
+            margin-top: 16px;
+        }
+        
+        .news-original-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: #0f2f73;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .news-original-content {
+            font-size: 13px;
+            color: #475569;
+            line-height: 1.5;
+        }
+
+        /* 个股分析页面样式 */
+        .search-box {
+            background: white;
+            border-radius: 32px;
+            padding: 10px 16px;
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            border: 0.5px solid #E2E8F0;
+        }
+        
+        .search-box input {
+            flex: 1;
+            border: none;
+            outline: none;
+            font-size: 15px;
+            background: transparent;
+        }
+        
+        .search-box button {
+            background: #0f2f73;
+            border: none;
+            color: white;
+            padding: 6px 20px;
+            border-radius: 30px;
+            font-weight: 500;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        
+        .stock-info-card {
+            background: white;
+            border-radius: 24px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .stock-name-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 8px;
+        }
+        
+        .stock-name {
+            font-size: 20px;
+            font-weight: 700;
+            color: #1E293B;
+        }
+        
+        .stock-code {
+            font-size: 13px;
+            color: #94A3B8;
+        }
+        
+        .stock-price {
+            font-size: 32px;
+            font-weight: 700;
+            color: #1E293B;
+        }
+        
+        .stock-change-percent {
+            font-size: 16px;
+            font-weight: 600;
+            margin-left: 12px;
+        }
+        
+        .stock-change-percent.positive {
+            color: #10B981;
+        }
+        
+        .stock-change-percent.negative {
+            color: #EF4444;
+        }
+        
+        .stock-detail {
+            font-size: 12px;
+            color: #64748B;
+            margin-top: 8px;
+        }
+        
+        .kline-container {
+            background: white;
+            border-radius: 24px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .kline-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        
+        .kline-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: #0f2f73;
+        }
+        
+        .kline-btn {
+            background: #F1F5F9;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            color: #0f2f73;
+            cursor: pointer;
+        }
+        
+        canvas {
+            width: 100%;
+            height: 200px;
+            background: #FAFAFA;
+            border-radius: 12px;
+            margin-bottom: 12px;
+        }
+        
+        .kline-tip {
+            font-size: 10px;
+            color: #94A3B8;
+            text-align: center;
+            margin-top: 8px;
+        }
+        
+        .history-card {
+            background: white;
+            border-radius: 24px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .history-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: #0f2f73;
+            margin-bottom: 12px;
+        }
+        
+        .history-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        
+        .history-item {
+            background: #F8FAFE;
+            border-radius: 16px;
+            padding: 10px;
+        }
+        
+        .history-label {
+            font-size: 11px;
+            color: #64748B;
+            margin-bottom: 4px;
+        }
+        
+        .history-value {
+            font-size: 16px;
+            font-weight: 700;
+            color: #1E293B;
+        }
+        
+        .ai-insight-card {
+            background: #F0F4FA;
+            border-radius: 24px;
+            padding: 16px;
+            margin-bottom: 16px;
+            border-left: 4px solid #0f2f73;
+        }
+        
+        .insight-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: #0f2f73;
+            margin-bottom: 12px;
+        }
+        
+        .insight-list {
+            list-style: none;
+            padding-left: 0;
+        }
+        
+        .insight-list li {
+            font-size: 13px;
+            color: #334155;
+            line-height: 1.6;
+            margin-bottom: 8px;
+            padding-left: 16px;
+            position: relative;
+        }
+        
+        .insight-list li:before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: #0f2f73;
+            font-weight: bold;
+        }
+        
+        .suggestion-card {
+            background: white;
+            border-radius: 24px;
+            padding: 16px;
+            margin-bottom: 16px;
+            border: 1px solid #E2E8F0;
+        }
+        
+        .suggestion-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: #0f2f73;
+            margin-bottom: 12px;
+        }
+        
+        .disclaimer {
+            font-size: 10px;
+            color: #94A3B8;
+            text-align: center;
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 0.5px solid #EDF2F7;
+        }
+        
+        /* AI对话页面 */
+        .chat-full-page {
+            height: calc(100vh - 100px);
+            display: flex;
+            flex-direction: column;
+            background: white;
+            border-radius: 24px;
+            overflow: hidden;
+        }
+        
+        .chat-full-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            border-bottom: 0.5px solid #EDF2F7;
+            background: white;
+        }
+        
+        .chat-full-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            background: #F8FAFE;
+        }
+        
+        .chat-full-input {
+            display: flex;
+            gap: 8px;
+            padding: 12px 16px;
+            background: white;
+            border-top: 0.5px solid #EDF2F7;
+        }
+        
+        .chat-full-input input {
+            flex: 1;
+            border: 0.5px solid #E2E8F0;
+            border-radius: 30px;
+            padding: 12px 16px;
+            font-size: 14px;
+        }
+        
+        .chat-full-input button {
+            background: #0f2f73;
+            border: none;
+            color: white;
+            border-radius: 30px;
+            padding: 0 20px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        
+        .message {
+            margin-bottom: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .user-msg {
+            align-items: flex-end;
+        }
+        
+        .ai-msg {
+            align-items: flex-start;
+        }
+        
+        .bubble {
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        
+        .user-msg .bubble {
+            background: #0f2f73;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+        
+        .ai-msg .bubble {
+            background: white;
+            color: #1E293B;
+            border-bottom-left-radius: 4px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+        
+        .upload-area {
+            background: #F8FAFE;
+            border: 1px dashed #CBD5E1;
+            border-radius: 24px;
+            padding: 24px;
+            text-align: center;
+            cursor: pointer;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .analysis-result {
+            background: white;
+            border-radius: 24px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+        
+        .upload-icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+
+        /* 创新：产品主线、叙事强度、因果链、风险情景、时间轴、笔记、分位尺、场景对话、财报清单 */
+        .product-tagline {
+            font-size: 13px;
+            color: #475569;
+            line-height: 1.55;
+            margin-bottom: 16px;
+            padding: 12px 14px;
+            background: linear-gradient(135deg, rgba(15,47,115,0.07), rgba(30,74,138,0.05));
+            border-radius: 16px;
+            border-left: 3px solid #0f2f73;
+        }
+        .news-narrative-bar {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 0.5px dashed #E2E8F0;
+        }
+        .narrative-label {
+            font-size: 10px;
+            color: #94A3B8;
+            margin-bottom: 4px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .narrative-track {
+            height: 6px;
+            background: #E2E8F0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .narrative-fill {
+            height: 100%;
+            border-radius: 4px;
+            background: linear-gradient(90deg, #0f2f73, #3b82f6);
+            transition: width 0.3s ease;
+        }
+        .causal-flow { margin: 12px 0; }
+        .causal-box {
+            background: white;
+            border-radius: 16px;
+            padding: 12px 14px;
+            border: 1px solid #E2E8F0;
+        }
+        .causal-tag {
+            font-size: 11px;
+            font-weight: 700;
+            color: #0f2f73;
+            letter-spacing: 0.02em;
+            margin-bottom: 6px;
+            display: block;
+        }
+        .causal-box p {
+            font-size: 13px;
+            color: #334155;
+            line-height: 1.5;
+            margin: 0;
+        }
+        .causal-arrow {
+            text-align: center;
+            color: #94A3B8;
+            font-size: 16px;
+            padding: 6px 0;
+        }
+        .risk-card {
+            background: #FFF7ED;
+            border: 1px solid #FDBA74;
+            border-radius: 20px;
+            padding: 14px;
+            margin: 12px 0;
+        }
+        .risk-title {
+            font-weight: 600;
+            font-size: 13px;
+            color: #C2410C;
+            margin-bottom: 8px;
+        }
+        .risk-text {
+            font-size: 13px;
+            color: #7C2D12;
+            line-height: 1.55;
+        }
+        .mini-timeline { margin: 12px 0 0; }
+        .tl-row {
+            display: flex;
+            gap: 10px;
+            font-size: 12px;
+            padding: 10px 0;
+            border-bottom: 0.5px solid #EDF2F7;
+        }
+        .tl-row:last-child { border-bottom: none; }
+        .tl-date {
+            flex-shrink: 0;
+            color: #0f2f73;
+            font-weight: 600;
+            width: 92px;
+        }
+        .tl-desc { color: #475569; line-height: 1.45; flex: 1; }
+        .topic-notes-card {
+            background: white;
+            border-radius: 20px;
+            padding: 14px;
+            margin-top: 16px;
+            border: 1px solid #E2E8F0;
+        }
+        .topic-notes-card textarea {
+            width: 100%;
+            min-height: 76px;
+            border: 0.5px solid #E2E8F0;
+            border-radius: 12px;
+            padding: 10px;
+            font-size: 13px;
+            resize: vertical;
+            font-family: inherit;
+            box-sizing: border-box;
+        }
+        .topic-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+        .btn-primary-sm {
+            background: #0f2f73;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .btn-secondary-sm {
+            background: #F1F5F9;
+            color: #0f2f73;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .position-meter { margin-bottom: 14px; }
+        .position-meter-label { font-size: 11px; color: #64748B; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
+        .position-meter-track {
+            height: 10px;
+            background: linear-gradient(90deg, #E2E8F0 0%, #94A3B8 45%, #0f2f73 100%);
+            border-radius: 6px;
+            position: relative;
+        }
+        .position-meter-marker {
+            position: absolute;
+            top: -5px;
+            width: 4px;
+            height: 20px;
+            background: #1E293B;
+            border-radius: 2px;
+            transform: translateX(-50%);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+        }
+        .position-meter-scale {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: #94A3B8;
+            margin-top: 4px;
+        }
+        .stock-quick-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .stock-quick-btn {
+            font-size: 12px;
+            padding: 8px 12px;
+            background: #F0F4FA;
+            border: 0.5px solid #E2E8F0;
+            border-radius: 20px;
+            color: #0f2f73;
+            cursor: pointer;
+        }
+        .stock-quick-btn:active { opacity: 0.9; }
+        .chat-chips-wrap {
+            padding: 8px 16px 4px;
+            background: #F8FAFE;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            border-bottom: 0.5px solid #EDF2F7;
+        }
+        .chat-chip {
+            font-size: 12px;
+            padding: 6px 12px;
+            background: white;
+            border: 0.5px solid #CBD5E1;
+            border-radius: 20px;
+            color: #334155;
+            cursor: pointer;
+        }
+        .chat-chip:active { background: #F1F5F9; }
+        .earnings-checklist {
+            background: #F8FAFE;
+            border-radius: 20px;
+            padding: 14px;
+            margin-bottom: 12px;
+        }
+        .check-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            font-size: 13px;
+            color: #334155;
+            padding: 8px 0;
+            border-bottom: 0.5px solid #E2E8F0;
+        }
+        .check-row:last-child { border-bottom: none; }
+        .check-ok { color: #10B981; font-weight: 700; flex-shrink: 0; }
+        .check-pending { color: #94A3B8; flex-shrink: 0; }
+        .earnings-faq-title {
+            font-weight: 600;
+            font-size: 13px;
+            color: #0f2f73;
+            margin-bottom: 8px;
+        }
+        .earnings-faq ul {
+            font-size: 12px;
+            color: #64748B;
+            padding-left: 18px;
+            line-height: 1.75;
+            margin: 0;
+        }
+        .watchlist-empty-hint {
+            font-size: 13px;
+            color: #94A3B8;
+            text-align: center;
+            padding: 24px 12px;
+        }
+        .history-sub {
+            font-size: 11px;
+            font-weight: 400;
+            color: #64748B;
+        }
+    </style>
+</head>
+<body>
+<div class="app-container">
+    <!-- 首页 -->
+    <div id="page-home" class="page active-page">
+        <!-- 欢迎语 -->
+        <div class="welcome-section">
+            <div class="hello-text">你好，投资者</div>
+            <div class="product-tagline">财懂了：把资讯拆成<strong>因果链</strong>，标出<strong>若相反会怎样</strong>，并用<strong>价格分位尺</strong>对齐体感。热点可记笔记、标的可一键加入观察清单。</div>
+        </div>
+        
+        <!-- AI对话入口卡片 -->
+        <div class="ai-chat-entry" id="aiChatEntryBtn">
+            <div class="ai-chat-entry-left">
+                <div class="ai-chat-icon">🤖</div>
+                <div class="ai-chat-text">
+                    <h4>AI 智能助手</h4>
+                    <p>股票分析 · 一键进入对话</p>
+                </div>
+            </div>
+            <div class="ai-chat-arrow">→</div>
+        </div>
+        
+        <!-- 热点报道 -->
+        <div class="card">
+            <div class="hot-header">
+                <span class="hot-tag">🔥 热点报道</span>
+                <span class="more-link">精选价值资讯 ></span>
+            </div>
+            
+            <!-- 新闻1: 原油 -->
+            <div class="news-item" data-newsid="oil">
+                <div class="news-title">美国CFTC密切关注原油期货异常交易，特朗普帖前15分钟现5.8亿空单引发质疑</div>
+                <div class="news-ai-summary">
+                    🤖 AI摘要：美国商品期货交易委员会(CFTC)于3月30日宣布正密切关注原油期货市场异常交易。此前3月23日，特朗普在社交媒体发帖前15分钟，市场出现5.8亿美元原油空单，引发内幕交易质疑。监管机构表示将彻查此事，原油市场波动加剧。
+                </div>
+                <div class="news-meta"><span>2026-03-30 08:57</span><span>来源：新浪财经</span></div>
+                <div class="stock-chips"><span class="stock-chip">中国石化 600028.SH</span><span class="stock-chip">中国石油 601857.SH</span></div>
+                <div class="news-narrative-bar" aria-hidden="true">
+                    <div class="narrative-label"><span>叙事关注度（示意）</span><span>72%</span></div>
+                    <div class="narrative-track"><div class="narrative-fill" style="width:72%"></div></div>
+                </div>
+            </div>
+            
+            <!-- 新闻2: 大豆 -->
+            <div class="news-item" data-newsid="soy">
+                <div class="news-title">巴西ANEC：3月大豆出口预期微调至1586万吨，全球供应格局稳定</div>
+                <div class="news-ai-summary">
+                    🤖 AI摘要：巴西全国谷物出口商协会(ANEC)于3月31日发布数据显示，将3月大豆出口量预期从1587万吨微调至1586万吨，调整幅度仅0.06%。南美丰产预期下，全球大豆供应保持宽松格局，国内压榨企业成本可控，农产品价格预计维持区间震荡。
+                </div>
+                <div class="news-meta"><span>2026-03-31 01:24</span><span>来源：百度财经</span></div>
+                <div class="stock-chips"><span class="stock-chip">北大荒 600598.SH</span><span class="stock-chip">苏垦农发 601952.SH</span></div>
+                <div class="news-narrative-bar" aria-hidden="true">
+                    <div class="narrative-label"><span>叙事关注度（示意）</span><span>58%</span></div>
+                    <div class="narrative-track"><div class="narrative-fill" style="width:58%"></div></div>
+                </div>
+            </div>
+            
+            <!-- 新闻3: 化肥 -->
+            <div class="news-item" data-newsid="fertilizer">
+                <div class="news-title">中东冲突导致霍尔木兹海峡航运受阻，全球化肥与能源价格攀升</div>
+                <div class="news-ai-summary">
+                    🤖 AI摘要：中东地缘冲突升级，霍尔木兹海峡航运受阻，引发市场对能源和化肥供应担忧。全球化肥价格应声上涨，欧洲和北非农业生产成本预计上升。分析认为，拥有磷矿、钾肥资源的国内龙头企业有望受益于价格上涨周期。
+                </div>
+                <div class="news-meta"><span>2026-03-31 20:21</span><span>来源：新浪财经</span></div>
+                <div class="stock-chips"><span class="stock-chip">盐湖股份 000792.SZ</span><span class="stock-chip">云天化 600096.SH</span></div>
+                <div class="news-narrative-bar" aria-hidden="true">
+                    <div class="narrative-label"><span>叙事关注度（示意）</span><span>81%</span></div>
+                    <div class="narrative-track"><div class="narrative-fill" style="width:81%"></div></div>
+                </div>
+            </div>
+            
+            <!-- 新闻4: 蜜雪冰城 -->
+            <div class="news-item" data-newsid="mixue">
+                <div class="news-title">蜜雪冰城全球门店近60000家，海外业务净增长，幸运咖单店效益持续改善</div>
+                <div class="news-ai-summary">
+                    🤖 AI摘要：蜜雪冰城全球门店突破60000家，2026年预期门店增速接近15%，海外业务进入净增长阶段。旗下咖啡品牌幸运咖单店效益持续改善，供应链和数字化能力支撑效率提升。机构认为，多品牌矩阵拓展为长期高质量增长提供坚实基础。
+                </div>
+                <div class="news-meta"><span>2026-04-01 09:00</span><span>来源：百度财经</span></div>
+                <div class="stock-chips"><span class="stock-chip">蜜雪集团 02097.HK</span><span class="stock-chip">古茗 01364.HK</span></div>
+                <div class="news-narrative-bar" aria-hidden="true">
+                    <div class="narrative-label"><span>叙事关注度（示意）</span><span>65%</span></div>
+                    <div class="narrative-track"><div class="narrative-fill" style="width:65%"></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 话题详情页 - 驱动事件 + 投资逻辑 + 核心标的 + 新闻原文 -->
+    <div id="page-topic" class="page">
+        <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 12px;">
+            <button class="back-btn" id="backHomeFromTopic">←</button>
+            <span style="font-weight:600; font-size:18px;">话题精读</span>
+        </div>
+        <div id="topicDetailContainer"></div>
+    </div>
+
+    <!-- 个股分析页面（原AI分析页面） -->
+    <div id="page-stock" class="page">
+        <div class="section-title">📈 个股分析</div>
+        
+        <div class="search-box">
+            <input type="text" id="stockSearchInput" placeholder="输入股票代码，如 600519" value="600519">
+            <button id="searchStockBtn">分析</button>
+        </div>
+        
+        <div id="stockAnalysisContent">
+            <div class="stock-info-card">
+                <div class="stock-name-row"><span class="stock-name" id="stockName">贵州茅台</span><span class="stock-code" id="stockCode">600519</span></div>
+                <div><span class="stock-price" id="stockPrice">¥1720.00</span><span class="stock-change-percent positive" id="stockChange">+1.45%</span></div>
+                <div class="stock-detail" id="stockDetail">今开1699 最高1728 最低1695</div>
+                <div class="position-meter">
+                    <div class="position-meter-label"><span>近1年价格分位（可视化）</span><span id="percentileLabel">62%</span></div>
+                    <div class="position-meter-track">
+                        <div class="position-meter-marker" id="positionMarker" style="left:62%"></div>
+                    </div>
+                    <div class="position-meter-scale"><span>历史偏低</span><span>历史偏高</span></div>
+                </div>
+            </div>
+            
+            <div class="stock-quick-row" id="stockQuickRow">
+                <button type="button" class="stock-quick-btn" data-q="若接下来财报不及预期，对当前估值影响最大的指标是什么？">财报不及预期</button>
+                <button type="button" class="stock-quick-btn" data-q="与同业相比，当前股价反映的优势与风险各是什么？">同业对比要点</button>
+                <button type="button" class="stock-quick-btn" data-q="基于当前分位与波动，短期最需要警惕的一种情景是什么？">最大风险情景</button>
+            </div>
+            
+            <div class="kline-container">
+                <div class="kline-header"><span class="kline-title">📈 K线走势图</span><div class="kline-controls"><button class="kline-btn" id="resetViewBtn">最新</button></div></div>
+                <canvas id="klineCanvas" width="400" height="200" style="width:100%; height:200px;"></canvas>
+                <div class="kline-tip">滚轮 / 双指捏合缩放，单指左右拖动看其他交易日；以下为日线收盘价</div>
+            </div>
+            
+            <div class="history-card">
+                <div class="history-title">📊 历史位置</div>
+                <div class="history-grid">
+                    <div class="history-item"><div class="history-label">近1年最高</div><div class="history-value" id="high52w">¥1920</div></div>
+                    <div class="history-item"><div class="history-label">近1年最低</div><div class="history-value" id="low52w">¥1600</div></div>
+                    <div class="history-item"><div class="history-label">价格分位</div><div class="history-value" id="percentile">62% <span class="history-sub">中位偏上</span></div></div>
+                    <div class="history-item"><div class="history-label">趋势状态</div><div class="history-value" id="trend">稳步上行</div></div>
+                </div>
+                <div class="text-small" style="margin-top: 10px;">近30日波动：<span id="volatility">低</span></div>
+            </div>
+            
+            <div class="ai-insight-card">
+                <div class="insight-title">🤖 AI 智能研判</div>
+                <ul class="insight-list" id="aiInsightList"><li>白酒板块稳健，当前位置中位偏上。</li><li>消费复苏延续时，关注1800元上方。</li><li>若大盘转弱，震荡整理概率增加。</li></ul>
+            </div>
+            
+            <div class="suggestion-card">
+                <div class="suggestion-title">📌 未持仓 · 操作建议</div>
+                <ul class="insight-list" id="suggestionList"><li>1700下方可分批关注。</li><li>长期配置价值较高。</li><li>短期波动较小，适合稳健型。</li></ul>
+                <div class="disclaimer">AI研判仅供参考，不构成投资建议</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- AI对话页面 -->
+    <div id="page-chat" class="page">
+        <div class="chat-full-page">
+            <div class="chat-full-header">
+                <button class="back-btn" id="backFromChat">←</button>
+                <span style="font-weight:600; font-size:18px;">AI 智能问答</span>
+            </div>
+            <div class="chat-full-messages" id="chatFullMessages">
+                <div class="message ai-msg"><div class="bubble">您好！我是财懂了AI助手。可先点下方<strong>场景问题</strong>，也可直接输入。我会结合您当前查看的个股与价格分位来答（演示版为模板回复）。</div></div>
+            </div>
+            <div class="chat-chips-wrap" id="chatChipsWrap">
+                <button type="button" class="chat-chip" data-q="用三点说明：当前股价与近一年分位的关系，对操作意味着什么？">分位与操作</button>
+                <button type="button" class="chat-chip" data-q="列出与该股相关的两条主要风险与一条机会。">风险与机会</button>
+                <button type="button" class="chat-chip" data-q="若大盘指数下周急跌，该股历史上通常如何反应？">与大盘联动</button>
+            </div>
+            <div class="chat-full-input">
+                <input type="text" id="chatFullInput" placeholder="输入问题，与AI对话...">
+                <button id="sendChatFullBtn">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 自选股页面（默认 + 本地「从话题加入」） -->
+    <div id="page-watchlist" class="page">
+        <div class="section-title">⭐ 我的观察清单</div>
+        <p class="text-small" style="margin:-8px 0 12px;">默认示例 + 在「话题精读」中可将核心标的加入此处（仅存本机）。</p>
+        <div class="card" id="watchlistContainer"></div>
+    </div>
+
+    <!-- 财报分析页面：勾稽检查 + 可追问方向 -->
+    <div id="page-earnings" class="page">
+        <div class="section-title">📄 AI 财报尽调</div>
+        <p class="text-small" style="margin-bottom:12px;">上传后先做<strong>结构化解构</strong>，再按需追问（对接真实模型后可逐条引用原文段落）。</p>
+        <div class="upload-area" id="uploadArea"><div class="upload-icon">📂</div><div>点击上传财报文件</div><div class="text-small">支持 PDF / Excel / 图片格式</div><input type="file" id="fileInput" class="file-input" accept=".pdf,.xlsx,.xls,image/*"></div>
+        <div id="earningsResult" style="display: none;" class="analysis-result">
+            <div style="font-weight:600; color:#0f2f73; margin-bottom:12px;">📋 勾稽与异常检查（示例）</div>
+            <div class="earnings-checklist" id="earningsChecklist"></div>
+            <div class="earnings-faq" id="earningsFaqBlock">
+                <div class="earnings-faq-title">可追问方向</div>
+                <ul>
+                    <li>营收增速与净利润增速是否匹配？主要靠量还是价？</li>
+                    <li>毛利率变化来自成本、结构还是一次性因素？</li>
+                    <li>经营现金流与净利润是否背离？应收/存货是否异常？</li>
+                    <li>若剔除政府补助与非经常性损益，主业利润趋势如何？</li>
+                </ul>
+            </div>
+            <div style="font-weight:600; color:#0f2f73; margin:16px 0 8px;">🤖 AI 综合解读（示例）</div>
+            <div id="earningsAnalysisText"></div>
+        </div>
+    </div>
+
+    <!-- 底部导航栏 - 将AI分析改为个股分析 -->
+    <div class="tab-bar">
+        <button class="tab-item active" data-page="home"><span class="tab-icon">🏠</span><span>首页</span></button>
+        <button class="tab-item" data-page="stock"><span class="tab-icon">📊</span><span>个股分析</span></button>
+        <button class="tab-item" data-page="watchlist"><span class="tab-icon">⭐</span><span>自选</span></button>
+        <button class="tab-item" data-page="earnings"><span class="tab-icon">📄</span><span>财报</span></button>
+    </div>
+</div>
+
+<script>
+    // 话题数据：因果链、若相反情景、时间轴、新闻原文（演示）
+    const topicDataMap = {
+        mixue: {
+            title: "蜜雪冰城全球门店6万，海外业务净增长",
+            drive: "驱动事件：蜜雪冰城全球门店近60000家，2026年预期门店增速接近15%；海外业务进入净增长阶段；幸运咖单店效益持续改善。据新浪财经报道，公司供应链优势持续强化，海外市场拓展加速。",
+            logic: "投资逻辑：通过全球门店高速扩张、海外市场优化及幸运咖单店效益提升，驱动业绩稳健增长。供应链和数字化能力支撑效率提升，多品牌矩阵拓展产品线，为长期高质量增长提供坚实基础。",
+            causalChain: [
+                { tag: "事件", text: "门店数与海外增速数据披露，验证扩张节奏。" },
+                { tag: "传导", text: "规模效应与供应链摊薄单位成本，利润弹性释放。" },
+                { tag: "影响", text: "同赛道估值锚定上移，龙头溢价与同业分化。" }
+            ],
+            riskIfWrong: "若消费走弱或同店下滑超预期，开店增速与单店模型无法同步改善，则当前叙事中的「高质量增长」需下调预期，股价可能先行反应在估值压缩上。",
+            timeline: [
+                { date: "2026-Q1", text: "门店与海外业务数据在财报季进一步验证。" },
+                { date: "同业对标", text: "关注新茶饮板块同店与开店指引是否一致。" }
+            ],
+            stocks: [
+                { name: "古茗", code: "01364.HK", change: "+1.39%", positive: true },
+                { name: "蜜雪集团", code: "02097.HK", change: "+0.56%", positive: true }
+            ],
+            originalNews: "蜜雪冰城全球门店近60000家，2026年预期门店增速接近15%；海外业务进入净增长阶段；幸运咖单店效益持续改善。供应链和数字化能力支撑效率，多品牌矩阵拓展产品线，为长期高质量增长提供坚实基础。来源：百度财经 2026-04-01"
+        },
+        oil: {
+            title: "原油期货异常交易引监管关注",
+            drive: "驱动事件：美国商品期货交易委员会（CFTC）于2026年3月30日宣布正密切关注原油期货市场异常交易，此前3月23日特朗普发帖前15分钟出现5.8亿美元空单引发内幕交易质疑。来源：新浪财经。",
+            logic: "投资逻辑：能源板块短期波动加剧，监管趋严或影响投机情绪，但供需基本面仍偏紧。关注油气龙头低吸机会，同时警惕政策风险对油价的短期扰动。",
+            causalChain: [
+                { tag: "事件", text: "监管表态与异常交易调查引发短期情绪扰动。" },
+                { tag: "传导", text: "油价波动 → 炼化成本与库存估值预期变化。" },
+                { tag: "影响", text: "一体化龙头相对抗波动，纯上游弹性更大。" }
+            ],
+            riskIfWrong: "若调查结论淡化、且地缘与供需未恶化，油价快速回落，则事件驱动逻辑减弱，板块可能重回基本面定价，需防追高回撤。",
+            timeline: [
+                { date: "2026-03-23", text: "异常空单时间与社交媒体发帖时点接近，引发质疑。" },
+                { date: "2026-03-30", text: "CFTC 公开表示密切关注原油期货异常交易。" }
+            ],
+            stocks: [
+                { name: "中国石化", code: "600028.SH", change: "+0.32%", positive: true },
+                { name: "中国石油", code: "601857.SH", change: "+0.15%", positive: true }
+            ],
+            originalNews: "美国商品期货交易委员会（CFTC）于2026年3月30日宣布正密切关注原油期货市场异常交易，此前3月23日特朗普发帖前15分钟出现5.8亿美元空单引发内幕交易质疑。监管机构表示将彻查此事，原油市场波动加剧。来源：新浪财经 2026-03-30"
+        },
+        soy: {
+            title: "巴西大豆出口预期微调，全球供应稳定",
+            drive: "驱动事件：巴西全国谷物出口商协会（ANEC）于03月31日将3月大豆出口量预期从1587万吨微调至1586万吨。来源：百度财经。",
+            logic: "投资逻辑：南美丰产预期下，大豆价格维持区间震荡，国内压榨企业成本可控。北大荒等种植企业受益于粮价高位，关注农产品加工链成本改善机会。",
+            causalChain: [
+                { tag: "事件", text: "巴西出口预期微调，确认南美供应仍偏宽松。" },
+                { tag: "传导", text: "国际豆价区间 → 国内压榨利润与种植链情绪。" },
+                { tag: "影响", text: "种植与加工龙头对粮价敏感度不同，需区分标的。" }
+            ],
+            riskIfWrong: "若南美天气或物流再现扰动、或国内需求骤升，宽松叙事可能逆转，豆类价格上行将挤压下游利润，原逻辑需修正。",
+            timeline: [
+                { date: "2026-03-31", text: "ANEC 更新 3 月大豆出口预估（微调）。" },
+                { date: "后续", text: "关注美豆种植意向与南美收割进度数据。" }
+            ],
+            stocks: [
+                { name: "北大荒", code: "600598.SH", change: "-0.21%", positive: false },
+                { name: "苏垦农发", code: "601952.SH", change: "+0.05%", positive: true }
+            ],
+            originalNews: "巴西全国谷物出口商协会（ANEC）于03月31日将3月大豆出口量预期从1587万吨微调至1586万吨，调整幅度仅0.06%。南美丰产预期下，全球大豆供应保持宽松格局。来源：百度财经 2026-03-31"
+        },
+        fertilizer: {
+            title: "中东冲突推高全球化肥及能源价格",
+            drive: "驱动事件：中东冲突导致霍尔木兹海峡航运受阻，全球化肥与能源价格攀升，推高农业生产成本。来源：新浪财经。",
+            logic: "投资逻辑：化肥价格上行利好国内拥有磷矿、钾肥资源的龙头企业，同时农产品景气度提升。关注盐湖股份、云天化等资源型企业的业绩弹性。",
+            causalChain: [
+                { tag: "事件", text: "航运受阻推升能源与化肥贸易成本预期。" },
+                { tag: "传导", text: "全球化肥报价上行 → 国内资源型企业定价权增强。" },
+                { tag: "影响", text: "具备矿资源与一体化产能的公司业绩弹性更大。" }
+            ],
+            riskIfWrong: "若冲突缓和、运力恢复或主要出口国增产，化肥价格回落，则涨价叙事收敛，需重新按供需均衡定价。",
+            timeline: [
+                { date: "地缘跟踪", text: "霍尔木兹海峡通行与运价高频指标。" },
+                { date: "财报季", text: "龙头化肥企业价差与销量验证。" }
+            ],
+            stocks: [
+                { name: "盐湖股份", code: "000792.SZ", change: "+2.1%", positive: true },
+                { name: "云天化", code: "600096.SH", change: "+1.8%", positive: true }
+            ],
+            originalNews: "中东地缘冲突升级，霍尔木兹海峡航运受阻，引发市场对能源和化肥供应担忧。全球化肥价格应声上涨，欧洲和北非农业生产成本预计上升。来源：新浪财经 2026-03-31"
+        }
+    };
+
+    const stockData = {
+        '600519': { name: '贵州茅台', code: '600519', price: 1720, change: 1.45, high: 1920, low: 1600, percentile: 62, trend: '稳步上行', volatility: '低', insight: ['白酒板块稳健，当前位置中位偏上。', '消费复苏延续时，关注1800元上方。', '若大盘转弱，震荡整理概率增加。'], suggestion: ['1700下方可分批关注。', '长期配置价值较高。', '短期波动较小，适合稳健型。'] },
+        '600028': { name: '中国石化', code: '600028', price: 6.28, change: 0.32, high: 6.80, low: 5.90, percentile: 55, trend: '区间震荡', volatility: '中', insight: ['油价高位震荡，一体化炼化龙头受益。', '股息率具备吸引力，防御属性强。', '关注原油价格走势及政策变化。'], suggestion: ['6.0附近可考虑配置。', '适合稳健型投资者长期持有。'] },
+        '601857': { name: '中国石油', code: '601857', price: 8.52, change: 0.15, high: 9.10, low: 7.80, percentile: 48, trend: '区间震荡', volatility: '中', insight: ['油价与炼化景气影响盈利弹性。', '高股息与能源安全主题长期存在。'], suggestion: ['关注油价节奏与政策预期差。'] },
+        '600598': { name: '北大荒', code: '600598', price: 14.2, change: -0.21, high: 15.6, low: 13.1, percentile: 44, trend: '区间震荡', volatility: '中', insight: ['粮价与种植链情绪相关。', '关注农产品价格与政策补贴。'], suggestion: ['波段思路，注意商品波动。'] },
+        '601952': { name: '苏垦农发', code: '601952', price: 9.85, change: 0.05, high: 10.4, low: 9.2, percentile: 51, trend: '区间震荡', volatility: '中', insight: ['区域种植与加工一体化。', '成本与粮价双重驱动。'], suggestion: ['适合作为农业主题配置观察。'] },
+        '000792': { name: '盐湖股份', code: '000792', price: 17.6, change: 2.1, high: 19.2, low: 14.8, percentile: 58, trend: '震荡上行', volatility: '中', insight: ['钾肥价格与资源禀赋为核心。', '关注全球化肥价差与出口政策。'], suggestion: ['涨价周期中业绩弹性大，注意回撤。'] },
+        '600096': { name: '云天化', code: '600096', price: 22.4, change: 1.8, high: 24.0, low: 19.5, percentile: 61, trend: '震荡上行', volatility: '中', insight: ['磷化工与化肥一体化。', '能源与原料成本影响毛利。'], suggestion: ['周期股注意景气顶点识别。'] },
+        '02097': { name: '蜜雪集团', code: '02097.HK', price: 188.6, change: 0.56, high: 210, low: 165, percentile: 68, trend: '稳步上行', volatility: '低', insight: ['门店突破6万家，海外业务净增长。', '供应链优势持续强化。', '2026年预期增速15%，业绩确定性高。'], suggestion: ['180附近可分批关注。', '长期配置价值较高。'] },
+        '01364': { name: '古茗', code: '01364.HK', price: 15.8, change: 1.39, high: 17.5, low: 14.2, percentile: 72, trend: '震荡上行', volatility: '中', insight: ['新茶饮同店复苏，区域优势稳固。', '单店模型优化，下沉市场渗透率提升。'], suggestion: ['15附近可关注。', '短期波动较大，注意风险。'] }
+    };
+
+    const WATCH_DEFAULT = [
+        { name: '贵州茅台', code: '600519', change: '+1.45%', pos: true },
+        { name: '中国石化', code: '600028', change: '+0.32%', pos: true },
+        { name: '蜜雪集团', code: '02097', change: '+0.56%', pos: true },
+        { name: '古茗', code: '01364', change: '+1.39%', pos: true }
+    ];
+    const LS_WATCH = 'finance_watch_extra';
+
+    function getWatchExtra() {
+        try { return JSON.parse(localStorage.getItem(LS_WATCH) || '[]'); } catch (e) { return []; }
+    }
+    function setWatchExtra(arr) {
+        localStorage.setItem(LS_WATCH, JSON.stringify(arr));
+    }
+    function plainCode(full) {
+        const p = (full || '').split('.')[0];
+        return p || full;
+    }
+    function renderWatchlist() {
+        const el = document.getElementById('watchlistContainer');
+        if (!el) return;
+        const extra = getWatchExtra();
+        const seen = new Set(WATCH_DEFAULT.map(w => w.code));
+        const merged = WATCH_DEFAULT.concat(extra.filter(x => x && x.code && !seen.has(x.code) && (seen.add(x.code), true)));
+        if (!merged.length) {
+            el.innerHTML = '<div class="watchlist-empty-hint">暂无标的，可在「话题精读」中点击加入观察清单。</div>';
+            return;
+        }
+        el.innerHTML = merged.map(w => {
+            const neg = (w.change || '').startsWith('-');
+            return `<div class="watchlist-item" data-stock="${w.name}" data-code="${w.code}"><span><strong>${w.name}</strong><span class="text-small"> ${w.code}</span></span><span class="stock-change ${neg ? 'negative' : ''}">${w.change}</span></div>`;
+        }).join('');
+        el.querySelectorAll('.watchlist-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const code = item.dataset.code;
+                if (code && stockData[code]) {
+                    document.getElementById('stockSearchInput').value = code;
+                    updateStockUI(stockData[code]);
+                    switchPage('stock');
+                }
+            });
+        });
+    }
+
+    let currentTopicId = null;
+
+    function topicNoteKey(id) { return 'finance_topic_note_' + id; }
+    function loadTopicNote(id) { return localStorage.getItem(topicNoteKey(id)) || ''; }
+
+    function addTopicStocksToWatch() {
+        if (!currentTopicId) return;
+        const topic = topicDataMap[currentTopicId];
+        if (!topic) return;
+        let extra = getWatchExtra();
+        const codes = new Set([...WATCH_DEFAULT.map(w => w.code), ...extra.map(e => e.code)]);
+        topic.stocks.forEach(s => {
+            const c = plainCode(s.code);
+            if (codes.has(c)) return;
+            const ch = s.change || '';
+            const pos = !ch.startsWith('-');
+            extra.push({ name: s.name, code: c, change: ch, pos: pos });
+            codes.add(c);
+        });
+        setWatchExtra(extra);
+        renderWatchlist();
+        alert('已将本话题核心标的加入观察清单（本机保存）。');
+    }
+
+    function saveTopicNote() {
+        if (!currentTopicId) return;
+        const ta = document.getElementById('topicNoteInput');
+        if (ta) localStorage.setItem(topicNoteKey(currentTopicId), ta.value);
+        alert('笔记已保存（仅本机）。');
+    }
+    
+    let currentStock = stockData['600519'];
+    let klineData = [1680, 1695, 1702, 1698, 1710, 1705, 1715, 1720, 1718, 1725];
+    
+    // 显示话题详情：因果链、若相反情景、时间轴、笔记、加入观察
+    function showTopic(topicId) {
+        const topic = topicDataMap[topicId];
+        if (!topic) return;
+        currentTopicId = topicId;
+        let stocksHtml = '';
+        topic.stocks.forEach(s => {
+            stocksHtml += `<div class="stock-row"><div><span class="stock-name">${s.name}</span><span class="text-small"> ${s.code}</span></div><div class="stock-change ${!s.positive ? 'negative' : ''}">${s.change}</div></div>`;
+        });
+        const chain = topic.causalChain || [];
+        let causalHtml = '';
+        chain.forEach((step, i) => {
+            causalHtml += `<div class="causal-box"><span class="causal-tag">${step.tag}</span><p>${step.text}</p></div>`;
+            if (i < chain.length - 1) causalHtml += `<div class="causal-arrow">↓</div>`;
+        });
+        const tl = topic.timeline || [];
+        let tlHtml = tl.map(t => `<div class="tl-row"><span class="tl-date">${t.date}</span><span class="tl-desc">${t.text}</span></div>`).join('');
+        const riskText = topic.riskIfWrong || '（可补充：何种数据若出现，会推翻当前叙事。）';
+        const html = `
+            <div class="topic-header">
+                <div class="topic-title">${topic.title}</div>
+                <div class="card" style="margin-bottom:12px;">
+                    <div class="section-label">🔗 因果链</div>
+                    <div class="causal-flow">${causalHtml || '<p class="text-small">暂无</p>'}</div>
+                </div>
+                <div class="risk-card">
+                    <div class="risk-title">⚠️ 若相反会怎样（可证伪点）</div>
+                    <div class="risk-text">${riskText}</div>
+                </div>
+                <div class="drive-card">
+                    <div class="section-label">📌 驱动事件</div>
+                    <div class="drive-text">${topic.drive}</div>
+                </div>
+                <div class="logic-card">
+                    <div class="section-label">💡 投资逻辑</div>
+                    <div class="drive-text">${topic.logic}</div>
+                </div>
+                <div class="card">
+                    <div class="section-label">📅 关键时间轴 / 跟踪点</div>
+                    <div class="mini-timeline">${tlHtml || '<p class="text-small">暂无</p>'}</div>
+                </div>
+            </div>
+            <div class="card">
+                <div style="font-weight:600; margin-bottom:12px; color:#0f2f73;">📊 核心标的</div>
+                ${stocksHtml}
+            </div>
+            <div class="news-original">
+                <div class="news-original-title">📰 新闻原文</div>
+                <div class="news-original-content">${topic.originalNews}</div>
+            </div>
+            <div class="topic-notes-card">
+                <div class="section-label">📝 我的笔记（仅本机）</div>
+                <textarea id="topicNoteInput" placeholder="记录你的判断、存疑点或验证计划…"></textarea>
+                <div class="topic-actions">
+                    <button type="button" class="btn-primary-sm" id="saveTopicNoteBtn">保存笔记</button>
+                    <button type="button" class="btn-secondary-sm" id="addTopicWatchBtn">加入观察清单</button>
+                </div>
+            </div>
+        `;
+        document.getElementById('topicDetailContainer').innerHTML = html;
+        const ta = document.getElementById('topicNoteInput');
+        if (ta) ta.value = loadTopicNote(topicId);
+        document.getElementById('saveTopicNoteBtn')?.addEventListener('click', saveTopicNote);
+        document.getElementById('addTopicWatchBtn')?.addEventListener('click', addTopicStocksToWatch);
+        switchPage('topic');
+    }
+    
+    function updateStockUI(stock) {
+        currentStock = stock;
+        document.getElementById('stockName').innerText = stock.name;
+        document.getElementById('stockCode').innerText = stock.code;
+        document.getElementById('stockPrice').innerText = `¥${stock.price}`;
+        const changeSpan = document.getElementById('stockChange');
+        changeSpan.innerText = `${stock.change >= 0 ? '+' : ''}${stock.change}%`;
+        changeSpan.className = `stock-change-percent ${stock.change >= 0 ? 'positive' : 'negative'}`;
+        const openPrice = (stock.price * (1 - stock.change / 100)).toFixed(2);
+        document.getElementById('stockDetail').innerHTML = `今开${openPrice} 最高${(stock.price * 1.02).toFixed(2)} 最低${(stock.price * 0.98).toFixed(2)}`;
+        document.getElementById('high52w').innerHTML = `¥${stock.high}`;
+        document.getElementById('low52w').innerHTML = `¥${stock.low}`;
+        document.getElementById('percentile').innerHTML = `${stock.percentile}% <span class="history-sub">${stock.percentile > 50 ? '中位偏上' : '中位偏下'}</span>`;
+        const pl = document.getElementById('percentileLabel');
+        const mk = document.getElementById('positionMarker');
+        if (pl) pl.innerText = stock.percentile + '%';
+        if (mk) mk.style.left = Math.min(100, Math.max(0, stock.percentile)) + '%';
+        document.getElementById('trend').innerText = stock.trend;
+        document.getElementById('volatility').innerText = stock.volatility;
+        document.getElementById('aiInsightList').innerHTML = stock.insight.map(item => `<li>${item}</li>`).join('');
+        document.getElementById('suggestionList').innerHTML = stock.suggestion.map(item => `<li>${item}</li>`).join('');
+        drawKline();
+    }
+    
+    function drawKline() {
+        const canvas = document.getElementById('klineCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const container = canvas.parentElement;
+        const width = container.clientWidth - 32;
+        const height = 200;
+        canvas.width = width;
+        canvas.height = height;
+        ctx.clearRect(0, 0, width, height);
+        if (!klineData.length) return;
+        const barWidth = (width - 40) / klineData.length;
+        const maxVal = Math.max(...klineData);
+        const minVal = Math.min(...klineData);
+        const range = maxVal - minVal || 1;
+        for (let i = 0; i < klineData.length; i++) {
+            const x = 20 + i * barWidth;
+            const barHeight = ((klineData[i] - minVal) / range) * (height - 40);
+            const y = height - 20 - barHeight;
+            ctx.fillStyle = klineData[i] >= (klineData[i-1] || klineData[i]) ? '#10B981' : '#EF4444';
+            ctx.fillRect(x, y, barWidth - 2, barHeight);
+        }
+        ctx.beginPath();
+        ctx.strokeStyle = '#0f2f73';
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < klineData.length; i++) {
+            const x = 20 + i * barWidth + (barWidth - 2) / 2;
+            const y = height - 20 - ((klineData[i] - minVal) / range) * (height - 40);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+    
+    // 页面切换
+    function switchPage(pageId) {
+        const pages = ['home', 'topic', 'stock', 'chat', 'watchlist', 'earnings'];
+        pages.forEach(p => {
+            const el = document.getElementById(`page-${p}`);
+            if (el) el.classList.remove('active-page');
+        });
+        document.getElementById(`page-${pageId}`).classList.add('active-page');
+        document.querySelectorAll('.tab-item').forEach(tab => {
+            if (tab.dataset.page === pageId) tab.classList.add('active');
+            else tab.classList.remove('active');
+        });
+        if (pageId === 'stock' && currentStock) updateStockUI(currentStock);
+        if (pageId === 'watchlist') renderWatchlist();
+    }
+
+    function openChatWithPrefill(q) {
+        switchPage('chat');
+        const input = document.getElementById('chatFullInput');
+        if (input) {
+            input.value = q;
+            input.focus();
+        }
+    }
+
+    function buildChatReply(userText) {
+        const s = currentStock;
+        const p = s.percentile;
+        const low = ['分位', '位置', '操作'].some(k => userText.includes(k));
+        const risk = ['风险', '情景', '警惕', '不及预期'].some(k => userText.includes(k));
+        const peer = ['同业', '对比', '优势'].some(k => userText.includes(k));
+        const idx = ['大盘', '指数', '联动', '急跌'].some(k => userText.includes(k));
+        if (low) return `【${s.name}】近一年价格分位约 ${p}%（演示数据）。分位偏高时追涨容错低，偏低时更需结合基本面是否恶化；当前趋势「${s.trend}」，波动「${s.volatility}」。${s.insight[0]}`;
+        if (risk) return `【${s.name}】可重点关注：① ${s.volatility}波动下仓位节奏；② 行业政策与景气边际；③ ${s.suggestion[0] || '注意业绩与估值匹配。'}（演示回复，接入模型后可细化。）`;
+        if (peer) return `【${s.name}】与同业对比（演示）：优势常体现在${s.insight[0]}；风险在于行业竞争与成本。建议用一致口径比较 PE、增速与 ROE。`;
+        if (idx) return `【${s.name}】与大盘联动为统计意义上的经验描述（演示）。当前分位 ${p}%，若指数急跌，高估值/高波动标的往往回撤更大，需结合您的持仓周期。`;
+        return `【${s.name}】现价约 ¥${s.price}，分位 ${p}%，趋势「${s.trend}」。${s.insight[0]} ${s.insight[1] || ''}`;
+    }
+    
+    // 对话功能
+    function addChatMessage(message, isUser) {
+        const container = document.getElementById('chatFullMessages');
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `message ${isUser ? 'user-msg' : 'ai-msg'}`;
+        msgDiv.innerHTML = `<div class="bubble">${message}</div>`;
+        container.appendChild(msgDiv);
+        container.scrollTop = container.scrollHeight;
+    }
+    
+    // 绑定事件
+    document.querySelectorAll('.tab-item').forEach(tab => {
+        tab.addEventListener('click', () => switchPage(tab.dataset.page));
+    });
+    document.querySelectorAll('.news-item').forEach(item => {
+        item.addEventListener('click', () => { 
+            const id = item.dataset.newsid; 
+            if (id && topicDataMap[id]) showTopic(id); 
+        });
+    });
+    document.getElementById('backHomeFromTopic')?.addEventListener('click', () => switchPage('home'));
+    document.getElementById('aiChatEntryBtn')?.addEventListener('click', () => switchPage('chat'));
+    document.getElementById('backFromChat')?.addEventListener('click', () => switchPage('stock'));
+    document.getElementById('searchStockBtn')?.addEventListener('click', () => {
+        let code = document.getElementById('stockSearchInput').value.trim();
+        code = plainCode(code);
+        if (stockData[code]) updateStockUI(stockData[code]);
+        else updateStockUI(stockData['600519']);
+    });
+    document.getElementById('resetViewBtn')?.addEventListener('click', () => drawKline());
+    document.getElementById('stockQuickRow')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.stock-quick-btn');
+        if (!btn || !btn.dataset.q) return;
+        openChatWithPrefill(btn.dataset.q);
+    });
+    document.getElementById('chatChipsWrap')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.chat-chip');
+        if (!btn || !btn.dataset.q) return;
+        const input = document.getElementById('chatFullInput');
+        if (input) {
+            input.value = btn.dataset.q;
+            document.getElementById('sendChatFullBtn')?.click();
+        }
+    });
+    document.getElementById('sendChatFullBtn')?.addEventListener('click', () => {
+        const input = document.getElementById('chatFullInput');
+        const text = input.value.trim();
+        if (!text) return;
+        addChatMessage(text, true);
+        input.value = '';
+        setTimeout(() => {
+            addChatMessage(buildChatReply(text), false);
+        }, 320);
+    });
+    
+    // 财报上传：勾稽清单 + 综合解读示例
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    const earningsResult = document.getElementById('earningsResult');
+    const earningsAnalysisText = document.getElementById('earningsAnalysisText');
+    const earningsChecklist = document.getElementById('earningsChecklist');
+    uploadArea?.addEventListener('click', () => fileInput.click());
+    fileInput?.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            earningsResult.style.display = 'block';
+            if (earningsChecklist) {
+                earningsChecklist.innerHTML = `
+                    <div class="check-row"><span class="check-ok">✓</span><span>营收与净利润增速同向（示例：营收 +15.8%，净利 +22.3%）</span></div>
+                    <div class="check-row"><span class="check-ok">✓</span><span>毛利率 34.2%，需结合同比/环比与同业区间核对</span></div>
+                    <div class="check-row"><span class="check-pending">○</span><span>经营现金流与净利润匹配度（待对接解析后自动勾稽）</span></div>
+                    <div class="check-row"><span class="check-pending">○</span><span>应收与存货周转是否异常（待对接解析）</span></div>
+                    <div class="check-row"><span class="check-ok">✓</span><span>非经常性损益占比已粗览（示例：综合评级「增持」为演示输出）</span></div>
+                `;
+            }
+            earningsAnalysisText.innerHTML = `<div class="text-small" style="margin-bottom:8px;">📄 文件：${file.name}</div><div style="background:#F1F5F9; padding:12px; border-radius:16px; font-size:13px; line-height:1.55;">🤖 <strong>综合解读（示例）</strong>：收入与利润增速匹配度较好；毛利率处于需同业对照区间；若接入真实解析，将在上表逐项自动勾选并引用报表附注位置。</div>`;
+        }
+    });
+    
+    // 初始化
+    renderWatchlist();
+    updateStockUI(stockData['600519']);
+    window.addEventListener('resize', () => drawKline());
+</script>
+</body>
+</html>
