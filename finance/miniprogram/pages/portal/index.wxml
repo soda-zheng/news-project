@@ -130,8 +130,17 @@
   <view class="page {{activePage === 'stock' ? 'active-page' : ''}}">
     <view class="section-title">📈 个股分析</view>
     <view class="search-box">
-      <input class="search-input" value="{{stockSearchInput}}" placeholder="输入股票代码，如 600519" bindinput="onStockSearchInput" />
+      <input class="search-input" value="{{stockSearchInput}}" placeholder="代码或名称，如 600519、黄金" confirm-type="search" bindinput="onStockSearchInput" bindconfirm="onSearchStock" />
       <view class="search-btn" bindtap="onSearchStock">分析</view>
+    </view>
+    <view class="stock-suggest-wrap" wx:if="{{stockSuggestLoading || stockSuggestList.length}}">
+      <view wx:if="{{stockSuggestLoading}}" class="stock-suggest-status">正在匹配全市场 A 股…</view>
+      <scroll-view wx:elif="{{stockSuggestList.length}}" scroll-y class="stock-suggest-scroll">
+        <view class="stock-suggest-row" wx:for="{{stockSuggestList}}" wx:key="code" data-code="{{item.code}}" bindtap="onPickStockSuggest">
+          <text class="stock-suggest-name">{{item.name}}</text>
+          <text class="stock-suggest-code">{{item.code}}</text>
+        </view>
+      </scroll-view>
     </view>
     <view class="stock-info-card">
       <view class="stock-name-row">
@@ -180,11 +189,16 @@
         <view class="kline-btn" bindtap="onResetKline">最新</view>
       </view>
       <view class="kline-canvas-wrap">
-        <view class="kline-bars">
-          <view wx:for="{{klineBars}}" wx:key="index" class="kline-bar {{item.up ? 'up' : 'down'}}" style="height: {{item.hRpx}}rpx;"></view>
+        <view wx:if="{{!klineShowEcharts}}" class="kline-placeholder">{{klinePlaceholderText}}</view>
+        <view wx:if="{{klineShowEcharts}}" class="kline-ec-host">
+          <ec-canvas
+            id="stock-kline-ec"
+            canvas-id="stock-kline-canvas"
+            ec="{{ecKline}}"
+          ></ec-canvas>
         </view>
       </view>
-      <view class="kline-tip">滚轮 / 双指捏合缩放，单指左右拖动看其他交易日；以下为演示日线收盘价</view>
+      <view class="kline-tip">双指捏合缩放，单指左右拖动查看历史区间；红涨绿跌，下方为成交量（后端日线）</view>
     </view>
     <view class="history-card">
       <view class="history-title">📊 历史位置</view>
@@ -228,21 +242,22 @@
         <text class="chat-header-title">AI 智能问答</text>
         <view class="chat-header-side chat-header-spacer"></view>
       </view>
-      <scroll-view class="chat-full-messages" scroll-y style="height: {{chatMsgAreaPx}}px;">
+      <scroll-view class="chat-full-messages" scroll-y>
         <view wx:for="{{chatMessages}}" wx:key="index" id="msg-{{index}}" class="message {{item.role === 'user' ? 'user-msg' : 'ai-msg'}}">
           <view class="bubble" hover-class="bubble-press" hover-stay-time="80">{{item.text}}</view>
         </view>
       </scroll-view>
-      <view class="chat-chips-wrap">
-        <view
-          class="chat-chip"
-          wx:for="{{chatQuickChips}}"
-          wx:key="label"
-          data-q="{{item.q}}"
-          bindtap="onChatChipTap"
-        >{{item.label}}</view>
-      </view>
-      <view class="chat-input-wrap">
+      <!-- 底栏整块白底贴屏底，安全区内边距只在这一层，避免输入条下方再露一截异色 -->
+      <view class="chat-footer-dock">
+        <view class="chat-chips-wrap">
+          <view
+            class="chat-chip"
+            wx:for="{{chatQuickChips}}"
+            wx:key="label"
+            data-q="{{item.q}}"
+            bindtap="onChatChipTap"
+          >{{item.label}}</view>
+        </view>
         <view class="chat-full-input">
           <input
             class="chat-input {{chatInputFocus ? 'chat-input--focus' : ''}}"
@@ -303,7 +318,7 @@
         <view class="watchlist-modal-title">添加自选股</view>
         <input
           class="watchlist-modal-input"
-          placeholder="输入股票代码，如 600519"
+          placeholder="代码或名称，如 600519、贵州茅台"
           placeholder-class="watchlist-modal-ph"
           value="{{watchlistAddInput}}"
           bindinput="onWatchlistAddInput"

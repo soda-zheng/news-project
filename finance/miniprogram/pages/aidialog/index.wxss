@@ -1,8 +1,21 @@
-.safe {
-  padding-top: 80rpx;
+/* 整页撑满视口 + 底部输入区贴底（含安全区），避免 flex 内 scroll-view 留白 */
+page {
+  height: 100%;
+  box-sizing: border-box;
 }
 
-.topbar-chat { position: relative; }
+.chat-page-root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding-top: calc(env(safe-area-inset-top) + 12rpx);
+}
+
+.topbar-chat {
+  position: relative;
+  flex-shrink: 0;
+}
 
 .back-btn {
   width: 56rpx;
@@ -40,7 +53,8 @@
 }
 
 .chat-page {
-  height: calc(100vh - 98rpx);
+  flex: 1;
+  min-height: 0;
   padding: 12rpx 20rpx 0;
   box-sizing: border-box;
   display: flex;
@@ -85,7 +99,14 @@
 .stock-chip-name { font-size: 22rpx; color: #1D2939; font-weight: 600; }
 .stock-chip-price { font-size: 24rpx; color: #16A34A; font-weight: 700; }
 
-.chat-list { flex: 1; padding: 8rpx 0 14rpx; }
+/* height:0 + flex:1 让 scroll-view 吃掉剩余高度，否则底部会顶不上去 */
+.chat-list {
+  flex: 1;
+  min-height: 0;
+  height: 0;
+  padding: 8rpx 0 14rpx;
+  box-sizing: border-box;
+}
 .msg-row { display: flex; margin-bottom: 14rpx; padding: 0 6rpx; }
 .msg-ai-row { justify-content: flex-start; }
 .msg-user-row { justify-content: flex-end; }
@@ -101,7 +122,12 @@
 .msg-text { font-size: 24rpx; line-height: 38rpx; color: #101828; }
 .msg-user .msg-text { color: #FFFFFF; }
 
-.chat-footer { background: #F3F5F8; padding-bottom: 12rpx; }
+.chat-footer {
+  flex-shrink: 0;
+  background: #F3F5F8;
+  padding-bottom: calc(12rpx + env(safe-area-inset-bottom));
+  padding-top: 8rpx;
+}
 .qa-tags { white-space: nowrap; width: 100%; margin-bottom: 10rpx; }
 .qa-tags .qa-tag { display: inline-block; white-space: nowrap; }
 .qa-tag {

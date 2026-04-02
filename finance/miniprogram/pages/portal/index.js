@@ -1,4 +1,6 @@
 const { profileMenus } = require('../../utils/data')
+const { getQuote, searchStocks, getStockDailyBars } = require('../../utils/api')
+const { getCodeByKeyword } = require('../../utils/helpers')
 
 const topicDataMap = {
   mixue: {
@@ -358,17 +360,85 @@ function formatTopicNoteTime(ts) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+function isAshare6digit(code) {
+  return /^\d{6}$/.test(String(code || '').trim())
+}
+
 function resolveStockKey(raw) {
-  const s = String(raw || '').trim().toUpperCase()
-  if (!s) return null
-  if (stockData[s]) return s
-  const stripped = s.replace(/\.(SH|SZ|HK)$/i, '')
+  const orig = String(raw || '').trim()
+  if (!orig) return null
+  if (stockData[orig]) return orig
+  const sul = orig.toUpperCase()
+  const stripped = orig.replace(/\.(SH|SZ|HK)$/i, '')
   if (stockData[stripped]) return stripped
   for (const k of Object.keys(stockData)) {
     const c = String(stockData[k].code).toUpperCase()
-    if (c === s || c.replace(/\./g, '') === stripped.replace(/\./g, '')) return k
+    if (c === sul || c.replace(/\./g, '') === stripped.replace(/\./g, '').toUpperCase()) return k
+  }
+
+  const alias = getCodeByKeyword(orig)
+  if (alias) {
+    if (stockData[alias]) return alias
+    if (isAshare6digit(alias)) return alias
+  }
+
+  const compact = orig.replace(/\s+/g, '')
+  for (const k of Object.keys(stockData)) {
+    const nm = String(stockData[k].name || '').replace(/\s+/g, '')
+    if (nm && nm === compact) return k
+  }
+  if (orig.length >= 2) {
+    for (const k of Object.keys(stockData)) {
+      const nm = stockData[k].name || ''
+      if (nm && nm.includes(orig)) return k
+    }
   }
   return null
+}
+
+/** 无内置演示数据时，仍允许输入 6 位 A 股拉后端行情 */
+function stockBaseForKey(key) {
+  if (stockData[key]) {
+    return { ...stockData[key] }
+  }
+  if (isAshare6digit(key)) {
+    return {
+      name: key,
+      code: key,
+      price: 0,
+      change: 0,
+      high: 0,
+      low: 0,
+      percentile: 50,
+      trend: '—',
+      volatility: '—',
+      insight: ['已连接后端时将显示实时价量；以下为占位说明。'],
+      suggestion: ['若长期无牌价，请检查网络与后端 /api/stock。']
+    }
+  }
+  return { ...stockData['600519'] }
+}
+
+function mergeQuoteIntoStock(base, apiRes) {
+  if (!base || !apiRes || apiRes.code !== 200 || !apiRes.data) return base
+  const d = apiRes.data
+  const pct = Number(d.pct_chg)
+  const change = Number.isFinite(pct) ? pct : base.change
+  const price = d.price != null ? Number(d.price) : base.price
+  const open = d.open != null ? Number(d.open) : undefined
+  const high = d.high != null ? Number(d.high) : base.high
+  const low = d.low != null ? Number(d.low) : base.low
+  return {
+    ...base,
+    name: d.name || base.name,
+    code: d.symbol || d.code || base.code,
+    price,
+    change,
+    open,
+    high,
+    low,
+    liveSource: d.source || ''
+  }
 }
 
 function buildWatchlistRows(codes) {
@@ -392,17 +462,111 @@ function buildWatchlistRows(codes) {
   return rows
 }
 
-const klineSeed = [1680, 1695, 1702, 1698, 1710, 1705, 1715, 1720, 1718, 1725]
-
-function buildKlineBars(arr) {
-  if (!arr || !arr.length) return []
-  const maxVal = Math.max(...arr)
-  const minVal = Math.min(...arr)
-  const range = maxVal - minVal || 1
-  return arr.map((v, i) => ({
-    hRpx: Math.max(16, Math.round(((v - minVal) / range) * 280)),
-    up: v >= (arr[i - 1] !== undefined ? arr[i - 1] : v)
-  }))
+/** ECharts：A股红涨绿跌 + 成交量 + 内置缩放 */
+function buildStockKlineOption(d) {
+  const dates = d.dates || []
+  const candle = d.candle || []
+  const vol = d.volume || []
+  const n = dates.length
+  const startPct = n > 80 ? Math.max(0, 100 - (80 / n) * 100) : 0
+  return {
+    animation: false,
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' }
+    },
+    axisPointer: { link: [{ xAxisIndex: [0, 1] }] },
+    grid: [
+      { left: 48, right: 16, top: 28, height: '48%' },
+      { left: 48, right: 16, top: '62%', height: '18%' }
+    ],
+    xAxis: [
+      {
+        type: 'category',
+        gridIndex: 0,
+        data: dates,
+        boundaryGap: true,
+        axisLine: { lineStyle: { color: '#94a3b8' } },
+        axisLabel: { fontSize: 9, color: '#64748b' }
+      },
+      {
+        type: 'category',
+        data: dates,
+        gridIndex: 1,
+        boundaryGap: true,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false }
+      }
+    ],
+    yAxis: [
+      {
+        type: 'value',
+        gridIndex: 0,
+        scale: true,
+        splitLine: { lineStyle: { color: '#e2e8f0', type: 'dashed' } },
+        axisLabel: { fontSize: 9, color: '#64748b' }
+      },
+      {
+        type: 'value',
+        gridIndex: 1,
+        scale: true,
+        splitNumber: 2,
+        axisLabel: { show: false },
+        splitLine: { show: false }
+      }
+    ],
+    dataZoom: [
+      {
+        type: 'inside',
+        xAxisIndex: [0, 1],
+        start: startPct,
+        end: 100,
+        filterMode: 'filter'
+      },
+      {
+        type: 'slider',
+        xAxisIndex: [0, 1],
+        start: startPct,
+        end: 100,
+        height: 22,
+        bottom: 4,
+        borderColor: '#e2e8f0',
+        fillerColor: 'rgba(15,47,115,0.12)',
+        handleStyle: { color: '#0f2f73' }
+      }
+    ],
+    series: [
+      {
+        name: 'K线',
+        type: 'candlestick',
+        gridIndex: 0,
+        data: candle,
+        itemStyle: {
+          color: '#ef4444',
+          color0: '#22c55e',
+          borderColor: '#ef4444',
+          borderColor0: '#22c55e'
+        }
+      },
+      {
+        name: '成交量',
+        type: 'bar',
+        gridIndex: 1,
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        data: vol.map((v, i) => {
+          const row = candle[i]
+          const up = row && row[1] >= row[0]
+          return {
+            value: v,
+            itemStyle: { color: up ? '#ef4444' : '#22c55e' }
+          }
+        })
+      }
+    ]
+  }
 }
 
 Page({
@@ -414,8 +578,9 @@ Page({
     profileMenus,
     stockSearchInput: '600519',
     currentStock: stockData['600519'],
-    klineData: klineSeed,
-    klineBars: buildKlineBars(klineSeed),
+    ecKline: { lazyLoad: true },
+    klineShowEcharts: false,
+    klinePlaceholderText: '加载K线…',
     chatInput: '',
     chatMessages: [
       {
@@ -434,6 +599,8 @@ Page({
     watchlistAddInput: '',
     watchlistHeaderMarginTopPx: 0,
     homeNewsList: buildHomeNewsList(),
+    stockSuggestList: [],
+    stockSuggestLoading: false,
     percentileBarWidth: 62,
     percentileMarkerLeft: 62,
     percentileLabel: '62%',
@@ -485,7 +652,15 @@ Page({
     this.setData({ watchlistItems: rows })
   },
 
+  onReady() {
+    this._pageViewReady = true
+  },
+
   onLoad() {
+    this._stockKlineChart = null
+    this._klineOption = null
+    this._stockSuggestTimer = null
+    this._stockSuggestSeq = 0
     let h = 44
     let watchlistHeaderMarginTopPx = 16
     try {
@@ -501,6 +676,7 @@ Page({
     } catch (e) {}
     this.setData({ statusBarHeight: h, watchlistHeaderMarginTopPx })
     this.updateStockUI(stockData['600519'])
+    this.refreshLiveQuote('600519')
     this._loadWatchlist()
   },
 
@@ -511,6 +687,16 @@ Page({
   },
 
   switchPage(pageId) {
+    if (pageId !== 'stock') {
+      if (this._stockSuggestTimer) {
+        clearTimeout(this._stockSuggestTimer)
+        this._stockSuggestTimer = null
+      }
+      this._stockSuggestSeq += 1
+      if (this.data.stockSuggestList.length || this.data.stockSuggestLoading) {
+        this.setData({ stockSuggestList: [], stockSuggestLoading: false })
+      }
+    }
     const main = ['home', 'stock', 'watchlist', 'earnings', 'mine']
     const patch = { activePage: pageId }
     if (main.includes(pageId)) patch.tabSelected = pageId
@@ -520,7 +706,9 @@ Page({
       this._layoutChatArea()
     }
     if (pageId === 'stock') {
+      const k = resolveStockKey(this.data.stockSearchInput) || '600519'
       this.updateStockUI(this.data.currentStock)
+      if (isAshare6digit(k)) this.refreshLiveQuote(k)
     }
   },
 
@@ -613,7 +801,34 @@ Page({
   },
 
   onBackChat() {
-    this.switchPage('stock')
+    this.switchPage('home')
+  },
+
+  refreshLiveQuote(key) {
+    if (!isAshare6digit(key)) return
+    getQuote(key)
+      .then((res) => {
+        if (res.code !== 200 || !res.data) {
+          wx.showToast({ title: String(res.msg || '行情失败').slice(0, 18), icon: 'none' })
+          const cur = resolveStockKey(this.data.stockSearchInput) || '600519'
+          if (cur === key) this._loadKlineForSymbol(key)
+          return
+        }
+        const cur = resolveStockKey(this.data.stockSearchInput) || '600519'
+        if (cur !== key) return
+        const merged = mergeQuoteIntoStock(stockBaseForKey(key), res)
+        this.updateStockUI(merged)
+        this._loadKlineForSymbol(key)
+      })
+      .catch(() => {
+        wx.showToast({
+          title: '连不上后端：真机请改局域网IP',
+          icon: 'none',
+          duration: 2800
+        })
+        const cur = resolveStockKey(this.data.stockSearchInput) || '600519'
+        if (cur === key) this._loadKlineForSymbol(key)
+      })
   },
 
   onStockQuickAsk(e) {
@@ -642,17 +857,231 @@ Page({
   },
 
   onStockSearchInput(e) {
-    this.setData({ stockSearchInput: e.detail.value })
+    const v = e.detail.value
+    this.setData({ stockSearchInput: v })
+    this._scheduleStockSuggest(v)
+  },
+
+  _scheduleStockSuggest(raw) {
+    if (this._stockSuggestTimer) {
+      clearTimeout(this._stockSuggestTimer)
+      this._stockSuggestTimer = null
+    }
+    const q = String(raw || '').trim()
+    if (!q) {
+      this._stockSuggestSeq += 1
+      this.setData({ stockSuggestList: [], stockSuggestLoading: false })
+      return
+    }
+    this._stockSuggestTimer = setTimeout(() => {
+      this._stockSuggestTimer = null
+      this._fetchStockSuggest(q)
+    }, 380)
+  },
+
+  _fetchStockSuggest(q) {
+    const seq = ++this._stockSuggestSeq
+    this.setData({ stockSuggestLoading: true })
+    searchStocks(q, 35)
+      .then((res) => {
+        if (seq !== this._stockSuggestSeq) return
+        if (res.code !== 200 || !res.data) {
+          this.setData({ stockSuggestList: [], stockSuggestLoading: false })
+          return
+        }
+        const items = Array.isArray(res.data.items) ? res.data.items : []
+        this.setData({ stockSuggestList: items, stockSuggestLoading: false })
+      })
+      .catch(() => {
+        if (seq !== this._stockSuggestSeq) return
+        this.setData({ stockSuggestList: [], stockSuggestLoading: false })
+      })
+  },
+
+  _commitStockKey(useKey) {
+    const key = String(useKey || '').trim()
+    if (!key) return
+    const s = stockBaseForKey(key)
+    this.setData({ stockSearchInput: key, stockSuggestList: [], stockSuggestLoading: false })
+    this.updateStockUI(s)
+    if (isAshare6digit(key)) this.refreshLiveQuote(key)
+  },
+
+  onPickStockSuggest(e) {
+    const code = String(e.currentTarget.dataset.code || '').trim()
+    if (!code) return
+    this._stockSuggestSeq += 1
+    if (this._stockSuggestTimer) {
+      clearTimeout(this._stockSuggestTimer)
+      this._stockSuggestTimer = null
+    }
+    this._commitStockKey(code)
+  },
+
+  /** 用后端搜索结果：1 条直接选中，多条写入列表并提示点选，0 条提示未找到 */
+  _applyRemoteSuggestItems(items, emptyMsg) {
+    const list = Array.isArray(items) ? items : []
+    this.setData({ stockSuggestList: list, stockSuggestLoading: false })
+    if (!list.length) {
+      wx.showToast({ title: emptyMsg || '未找到匹配 A 股', icon: 'none' })
+      return
+    }
+    if (list.length === 1) {
+      this._commitStockKey(String(list[0].code || '').trim())
+      return
+    }
+    wx.showToast({ title: '请从下方列表选择一只股票', icon: 'none' })
   },
 
   onSearchStock() {
-    const key = resolveStockKey(this.data.stockSearchInput)
-    const s = (key && stockData[key]) || stockData['600519']
-    this.updateStockUI(s)
+    const raw = String(this.data.stockSearchInput || '').trim()
+    if (!raw) {
+      wx.showToast({ title: '请输入代码或名称', icon: 'none' })
+      return
+    }
+    let key = resolveStockKey(raw)
+    if (!key && isAshare6digit(raw)) key = raw
+    if (key) {
+      this._commitStockKey(key)
+      return
+    }
+    const sug = this.data.stockSuggestList
+    if (sug && sug.length === 1) {
+      this._commitStockKey(String(sug[0].code || '').trim())
+      return
+    }
+    if (sug && sug.length > 1) {
+      wx.showToast({ title: '请从下方列表选择一只股票', icon: 'none' })
+      return
+    }
+    /* 列表往往还空：防抖未完成 / 请求未返回 / 刚切到个股 —— 点「分析」时补一次即时搜索 */
+    if (this._stockSuggestTimer) {
+      clearTimeout(this._stockSuggestTimer)
+      this._stockSuggestTimer = null
+    }
+    this._stockSuggestSeq += 1
+    wx.showLoading({ title: '查找中', mask: true })
+    searchStocks(raw, 35)
+      .then((res) => {
+        wx.hideLoading()
+        if (res.code !== 200 || !res.data) {
+          const tip = res.code === 503 ? '股票列表暂不可用（检查后端与 akshare）' : String(res.msg || '接口异常').slice(0, 18)
+          wx.showToast({ title: tip, icon: 'none', duration: 2800 })
+          return
+        }
+        this._applyRemoteSuggestItems(res.data.items, '未找到匹配 A 股，可换关键词')
+      })
+      .catch(() => {
+        wx.hideLoading()
+        wx.showToast({
+          title: '连不上后端：真机请配局域网 IP 并启动服务',
+          icon: 'none',
+          duration: 2800
+        })
+      })
+  },
+
+  _disposeKlineChartIfAny() {
+    if (this._stockKlineChart) {
+      try {
+        this._stockKlineChart.dispose()
+      } catch (e) {}
+      this._stockKlineChart = null
+    }
   },
 
   onResetKline() {
-    this.setData({ klineBars: buildKlineBars(this.data.klineData) })
+    if (!this._stockKlineChart || !this._klineOption) return
+    const dz = this._klineOption.dataZoom
+    const first = Array.isArray(dz) ? dz[0] : dz
+    const start = first && first.start != null ? first.start : 0
+    const end = first && first.end != null ? first.end : 100
+    try {
+      this._stockKlineChart.dispatchAction({ type: 'dataZoom', start, end })
+    } catch (e) {}
+  },
+
+  _loadKlineForSymbol(code6) {
+    const c = String(code6 || '')
+      .trim()
+      .replace(/\D/g, '')
+      .slice(-6)
+    if (!isAshare6digit(c)) {
+      this._disposeKlineChartIfAny()
+      this.setData({
+        klineShowEcharts: false,
+        klinePlaceholderText: '非沪深京 A 股暂无日线 K 线'
+      })
+      return
+    }
+    this.setData({ klinePlaceholderText: '加载K线…' })
+    getStockDailyBars(c)
+      .then((res) => {
+        if (res.code !== 200 || !res.data) {
+          this._disposeKlineChartIfAny()
+          this.setData({
+            klineShowEcharts: false,
+            klinePlaceholderText: String(res.msg || 'K线失败').slice(0, 24)
+          })
+          return
+        }
+        const d = res.data
+        if (!d.dates || !d.candle || !d.dates.length) {
+          this._disposeKlineChartIfAny()
+          this.setData({ klineShowEcharts: false, klinePlaceholderText: '无K线数据' })
+          return
+        }
+        this._klineOption = buildStockKlineOption(d)
+        const cur = this.data.currentStock || {}
+        const merged = {
+          ...cur,
+          high: d.high_52w,
+          low: d.low_52w,
+          percentile: Math.round(d.percentile)
+        }
+        const p = Math.round(d.percentile)
+        this.setData({
+          klineShowEcharts: true,
+          klinePlaceholderText: '',
+          currentStock: merged,
+          high52w: `¥${d.high_52w}`,
+          low52w: `¥${d.low_52w}`,
+          percentileText: `${p}%`,
+          percentileBarWidth: p,
+          percentileMarkerLeft: Math.min(100, Math.max(0, p)),
+          percentileLabel: `${p}%`,
+          percentileSub: p > 50 ? '中位偏上' : '中位偏下'
+        })
+        const run = () => this._ensureKlineChart()
+        if (typeof wx.nextTick === 'function') wx.nextTick(run)
+        else setTimeout(run, 50)
+      })
+      .catch(() => {
+        this._disposeKlineChartIfAny()
+        this.setData({
+          klineShowEcharts: false,
+          klinePlaceholderText: '网络错误，无法加载K线'
+        })
+      })
+  },
+
+  _ensureKlineChart() {
+    if (!this._klineOption) return
+    const com = this.selectComponent('#stock-kline-ec')
+    if (!com) return
+    const echartsLib = require('../../components/ec-canvas/echarts.min.js')
+    if (this._stockKlineChart) {
+      try {
+        this._stockKlineChart.setOption(this._klineOption, true)
+      } catch (e) {}
+      return
+    }
+    com.init((canvas, width, height, dpr) => {
+      const chart = echartsLib.init(canvas, null, { width, height, devicePixelRatio: dpr })
+      chart.setOption(this._klineOption)
+      this._stockKlineChart = chart
+      return chart
+    })
   },
 
   onChatInputTap() {
@@ -681,6 +1110,7 @@ Page({
     if (!s) return
     this.setData({ stockSearchInput: code })
     this.updateStockUI(s)
+    if (isAshare6digit(code)) this.refreshLiveQuote(code)
     this.switchPage('stock')
   },
 
@@ -699,7 +1129,7 @@ Page({
   confirmWatchlistAdd() {
     const key = resolveStockKey(this.data.watchlistAddInput)
     if (!key || !stockData[key]) {
-      wx.showToast({ title: '未找到该股票代码', icon: 'none' })
+      wx.showToast({ title: '未找到（请用代码或内置名称）', icon: 'none' })
       return
     }
     const cur = this.data.watchlistItems.map((r) => r.code)
@@ -747,10 +1177,14 @@ Page({
 
   updateStockUI(stock) {
     if (!stock) return
-    const openPrice = (stock.price * (1 - stock.change / 100)).toFixed(2)
-    const detail = `今开${openPrice} 最高${(stock.price * 1.02).toFixed(2)} 最低${(stock.price * 0.98).toFixed(2)}`
+    let detail
+    if (stock.open != null && stock.high != null && stock.low != null) {
+      detail = `今开${stock.open} 最高${stock.high} 最低${stock.low}`
+    } else {
+      const openPrice = (stock.price * (1 - stock.change / 100)).toFixed(2)
+      detail = `今开${openPrice} 最高${(stock.price * 1.02).toFixed(2)} 最低${(stock.price * 0.98).toFixed(2)}`
+    }
     const pctLabel = stock.change >= 0 ? `+${stock.change}%` : `${stock.change}%`
-    const klineData = this.data.klineData
     this.setData({
       currentStock: stock,
       stockName: stock.name,
@@ -769,8 +1203,7 @@ Page({
       trendText: stock.trend,
       volText: stock.volatility,
       aiInsightList: stock.insight,
-      suggestionList: stock.suggestion,
-      klineBars: buildKlineBars(klineData)
+      suggestionList: stock.suggestion
     })
   }
 })

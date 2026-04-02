@@ -6,6 +6,7 @@ import re
 import threading
 import time
 import uuid
+from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
 from flask import Flask, jsonify, request
@@ -21,6 +22,9 @@ SESSION.headers.update(
         "Referer": "https://finance.sina.com.cn",
     }
 )
+
+_STOCK_DAILY_BARS_CACHE: dict[str, dict] = {}
+_STOCK_DAILY_BARS_TTL_SEC = 60 * 60  # 1 小时
 
 
 def _now_str() -> str:
@@ -95,9 +99,11 @@ def _fetch_stock_live(symbol_input: str):
     update_time = _now_str()
     if len(fields) >= 32:
         update_time = f"{fields[30]} {fields[31]}".strip()
+    code6 = _parse_symbol(symbol_input) or symbol.replace("sh", "").replace("sz", "").replace("bj", "")
     return {
-        "symbol": symbol,
-        "name": name or symbol,
+        "symbol": code6,
+        "code": code6,
+        "name": name or code6,
         "price": round(price, 2),
         "chg": round(chg, 2),
         "pct_chg": pct,
@@ -106,7 +112,111 @@ def _fetch_stock_live(symbol_input: str):
         "high": round(high, 2),
         "low": round(low, 2),
         "update_time": update_time,
+        "source": "sina",
     }
+
+
+def _is_a_share_6digit(code: str) -> bool:
+    c = _parse_symbol(code)
+    return bool(c) and len(c) == 6 and c.isdigit()
+
+
+def _akshare_em_stock_name(code6: str) -> str:
+    try:
+        import akshare as ak
+    except ImportError:
+        return ""
+    try:
+        df = ak.stock_individual_info_em(symbol=code6)
+    except Exception:
+        return ""
+    if df is None or getattr(df, "empty", True):
+        return ""
+    cols = list(df.columns)
+    if len(cols) < 2:
+        return ""
+    ic, vc = cols[0], cols[1]
+    for _, row in df.iterrows():
+        if str(row[ic]).strip() in ("股票简称", "证券简称"):
+            return str(row[vc]).strip()
+    return ""
+
+
+def _fetch_quote_ak_bid_ask(code6: str) -> dict | None:
+    """AKShare 备用：东财买卖盘/盘口（含最新、涨跌幅、开高低、昨收）。"""
+    try:
+        import akshare as ak
+    except ImportError:
+        return None
+    try:
+        df = ak.stock_bid_ask_em(symbol=code6)
+    except Exception:
+        return None
+    if df is None or getattr(df, "empty", True) or len(df.columns) < 2:
+        return None
+    c0, c1 = df.columns[0], df.columns[1]
+    kv: dict[str, float | str] = {}
+    for _, row in df.iterrows():
+        k = str(row[c0]).strip()
+        kv[k] = row[c1]
+
+    def pick(*names: str):
+        for n in names:
+            if n in kv:
+                return kv[n]
+        return None
+
+    price = _to_float(pick("最新"), None)
+    if price is None or price <= 0:
+        return None
+    pct = _to_float(pick("涨幅"), 0.0) or 0.0
+    chg = _to_float(pick("涨跌"), 0.0) or 0.0
+    open_p = _to_float(pick("今开"), 0.0) or 0.0
+    high = _to_float(pick("最高"), 0.0) or 0.0
+    low = _to_float(pick("最低"), 0.0) or 0.0
+    prev_close = _to_float(pick("昨收"), 0.0) or 0.0
+    name = _akshare_em_stock_name(code6) or code6
+    return {
+        "symbol": code6,
+        "code": code6,
+        "name": name,
+        "price": round(float(price), 2),
+        "chg": round(float(chg), 2),
+        "pct_chg": round(float(pct), 2),
+        "open": round(float(open_p or 0), 2),
+        "prev_close": round(float(prev_close or 0), 2),
+        "high": round(float(high or 0), 2),
+        "low": round(float(low or 0), 2),
+        "update_time": _now_str(),
+        "source": "akshare-stock_bid_ask_em",
+    }
+
+
+def _quote_price_ok(q: dict | None) -> bool:
+    if not q:
+        return False
+    p = _to_float(q.get("price"), 0.0)
+    return p is not None and float(p) > 0
+
+
+def _fetch_a_share_quote(code6: str) -> dict | None:
+    """
+    A 股实时：新浪 hq.sinajs.cn 优先；无数据或价格为 0 时用东财 bid_ask 兜底。
+    """
+    sina = None
+    try:
+        sina = _fetch_stock_live(code6)
+    except Exception:
+        sina = None
+    if _quote_price_ok(sina):
+        return sina
+    akq = _fetch_quote_ak_bid_ask(code6)
+    if _quote_price_ok(akq):
+        return akq
+    if sina:
+        sina["source"] = "sina-incomplete"
+        return sina
+    return None
 
 
 def _parse_sina_json_v2(raw: str):
@@ -314,6 +424,88 @@ _SESSIONS: dict[str, dict] = {}
 _TASKS: dict[str, dict] = {}
 _LOCK = threading.Lock()
 _POOL = ThreadPoolExecutor(max_workers=2)
+
+# 全市场 A 股代码+名称（用于 /api/stock/search），短时缓存减轻 AKShare 请求压力
+_STOCK_A_NAME_LOCK = threading.Lock()
+_STOCK_A_NAME_CACHE: dict[str, object] = {"ts": 0.0, "items": []}
+_STOCK_A_NAME_TTL = float(os.environ.get("STOCK_A_NAME_CACHE_SEC", "600"))
+
+
+def _normalize_a_code(raw: object) -> str:
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    digits = re.sub(r"\D", "", s)
+    if len(digits) >= 6:
+        return digits[-6:]
+    if len(s) == 6 and s.isdigit():
+        return s
+    return ""
+
+
+def _df_to_code_name_items(df) -> list[dict[str, str]]:
+    if df is None or getattr(df, "empty", True):
+        return []
+    col_code = col_name = None
+    for c in df.columns:
+        cs = str(c).lower()
+        if col_code is None and ("代码" in str(c) or cs == "code"):
+            col_code = c
+        if col_name is None and ("名称" in str(c) or "name" == cs):
+            col_name = c
+    if col_code is None or col_name is None:
+        return []
+    codes = df[col_code].astype(str).str.strip()
+    names = df[col_name].astype(str).str.strip()
+    out: list[dict[str, str]] = []
+    for c, n in zip(codes, names):
+        c6 = _normalize_a_code(c)
+        if len(c6) == 6 and c6.isdigit() and n:
+            out.append({"code": c6, "name": n})
+    return out
+
+
+def _download_a_share_code_name_list() -> tuple[list[dict[str, str]], str | None]:
+    try:
+        import akshare as ak
+    except ImportError:
+        return [], "未安装 akshare，请 pip install -r requirements.txt"
+    err_notes: list[str] = []
+    for fn_name, fn in (
+        ("stock_info_a_code_name", getattr(ak, "stock_info_a_code_name", None)),
+        ("stock_zh_a_spot_em", getattr(ak, "stock_zh_a_spot_em", None)),
+    ):
+        if fn is None:
+            continue
+        try:
+            df = fn()
+            items = _df_to_code_name_items(df)
+            if items:
+                return items, None
+            err_notes.append(f"{fn_name}: 无有效行")
+        except Exception as e:
+            err_notes.append(f"{fn_name}: {e}")
+    return [], "；".join(err_notes) if err_notes else "无法获取 A 股列表"
+
+
+def _get_a_share_search_index() -> tuple[list[dict[str, str]], str | None]:
+    """返回 [{code, name}, ...]，必要时刷新缓存。"""
+    now = time.time()
+    with _STOCK_A_NAME_LOCK:
+        cached = _STOCK_A_NAME_CACHE["items"]
+        ts = float(_STOCK_A_NAME_CACHE["ts"] or 0)
+        if isinstance(cached, list) and cached and (now - ts) < _STOCK_A_NAME_TTL:
+            return cached, None
+    items_new, err = _download_a_share_code_name_list()
+    with _STOCK_A_NAME_LOCK:
+        if items_new:
+            _STOCK_A_NAME_CACHE["items"] = items_new
+            _STOCK_A_NAME_CACHE["ts"] = time.time()
+            return items_new, None
+        stale = _STOCK_A_NAME_CACHE["items"]
+        if isinstance(stale, list) and stale:
+            return stale, err
+        return [], err or "暂无股票列表"
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -439,16 +631,262 @@ def news_sina_global():
         return jsonify({"code": 500, "msg": str(e), "data": None})
 
 
+def _df_to_records(df):
+    if df is None or getattr(df, "empty", True):
+        return []
+    import pandas as pd
+
+    def _clean(v):
+        if v is None:
+            return None
+        try:
+            if pd.isna(v):
+                return None
+        except Exception:
+            pass
+        return float(v) if isinstance(v, (int, float)) else v
+
+    rows = []
+    for _, row in df.iterrows():
+        rows.append({str(k): _clean(row[k]) for k in df.columns})
+    return rows
+
+
 @app.route("/api/stock", methods=["GET"])
 def stock():
-    symbol = _parse_symbol(request.args.get("symbol", ""))
+    raw_in = str(request.args.get("symbol", "") or "").strip()
+    symbol = _parse_symbol(raw_in)
+    if not _is_a_share_6digit(symbol):
+        return jsonify({"code": 400, "msg": "当前仅支持沪深京 A 股 6 位数字代码", "data": None})
     try:
-        item = _fetch_stock_live(symbol)
+        item = _fetch_a_share_quote(symbol)
         if not item:
-            return jsonify({"code": 404, "msg": "未找到该股票/代码不支持", "data": None})
-        return jsonify({"code": 200, "msg": "success", "data": {**item, "input_symbol": symbol}})
+            return jsonify({"code": 404, "msg": "未找到该股票或数据源暂不可用", "data": None})
+        return jsonify({"code": 200, "msg": "success", "data": {**item, "input_symbol": raw_in}})
     except Exception as e:
         return jsonify({"code": 500, "msg": f"查询失败：{e}", "data": None})
+
+
+@app.route("/api/stock/search", methods=["GET"])
+def stock_search():
+    """按代码或简称子串搜索沪深京 A 股（全市场列表来自 AKShare，带服务端缓存）。"""
+    q = str(request.args.get("q", "") or "").strip()
+    try:
+        limit = int(request.args.get("limit", "30") or "30")
+    except Exception:
+        limit = 30
+    limit = max(1, min(80, limit))
+    if not q:
+        return jsonify({"code": 200, "msg": "success", "data": {"items": [], "update_time": _now_str()}})
+    items, err = _get_a_share_search_index()
+    if not items:
+        return jsonify({"code": 503, "msg": err or "股票列表暂不可用", "data": {"items": [], "update_time": _now_str()}})
+    ql = q.lower()
+    out: list[dict[str, str]] = []
+    for it in items:
+        name = str(it.get("name") or "")
+        code = str(it.get("code") or "")
+        if q in name or q in code or (name and ql in name.lower()):
+            out.append({"code": code, "name": name})
+            if len(out) >= limit:
+                break
+    return jsonify(
+        {
+            "code": 200,
+            "msg": "success",
+            "data": {"items": out, "q": q, "limit": limit, "update_time": _now_str()},
+        }
+    )
+
+
+def _df_pick_col(df, *names: str):
+    cols = list(df.columns)
+    for want in names:
+        for c in cols:
+            sc = str(c)
+            if sc == want or want in sc:
+                return c
+    return None
+
+
+@app.route("/api/stock/daily-bars", methods=["GET"])
+def stock_daily_bars():
+    """A 股近一年高低点与日线收盘价序列（用于网页 K 线与分位）。"""
+    raw_in = str(request.args.get("symbol", "") or "").strip()
+    symbol = _parse_symbol(raw_in)
+    if not _is_a_share_6digit(symbol):
+        return jsonify({"code": 400, "msg": "仅支持沪深京 A 股 6 位代码", "data": None})
+
+    # 频繁切换/刷新会导致 akshare 拉取被限流：做一层简单内存缓存。
+    now_ts = time.time()
+    cached = _STOCK_DAILY_BARS_CACHE.get(symbol)
+    if cached and (now_ts - cached.get("ts", 0)) < _STOCK_DAILY_BARS_TTL_SEC:
+        return jsonify({"code": 200, "msg": "success(cached)", "data": cached.get("data")})
+    try:
+        import akshare as ak
+    except ImportError:
+        return jsonify({"code": 503, "msg": "未安装 akshare", "data": None})
+    def _tx_symbol(code6: str) -> str:
+        # stock_zh_a_hist_tx 需要类似 sh600519 / sz000001 的前缀
+        return ("sh" if str(code6).startswith(("6", "9")) else "sz") + str(code6)
+
+    df = None
+    fetch_err = None
+    fetch_errors: list[str] = []
+    end_d = datetime.now().strftime("%Y%m%d")
+    # 缩短回溯区间以降低 akshare 拉取耗时（但足够覆盖尾部 ~250 个交易日）
+    start_d = (datetime.now() - timedelta(days=380)).strftime("%Y%m%d")
+
+    # 尽量做“多源兜底”：不同 akshare 版本 / 不同网络条件，函数可用性不同。
+    candidates: list[tuple[str, callable]] = []
+    if hasattr(ak, "stock_zh_a_hist_em"):
+        candidates.append(("stock_zh_a_hist_em", lambda: ak.stock_zh_a_hist_em(
+            symbol=symbol, period="daily", start_date=start_d, end_date=end_d, adjust="", timeout=20
+        )))
+    # stock_zh_a_hist 在你的环境里可能会 Connection aborted，因此也作为备选
+    if hasattr(ak, "stock_zh_a_hist"):
+        candidates.append(("stock_zh_a_hist", lambda: ak.stock_zh_a_hist(
+            symbol=symbol, period="daily", start_date=start_d, end_date=end_d, adjust="", timeout=20
+        )))
+    if hasattr(ak, "stock_zh_a_hist_tx"):
+        candidates.append(("stock_zh_a_hist_tx", lambda: ak.stock_zh_a_hist_tx(
+            symbol=_tx_symbol(symbol), start_date=start_d, end_date=end_d, adjust="", timeout=20
+        )))
+
+    for name, fn in candidates:
+        try:
+            df = fn()
+            if df is not None and not getattr(df, "empty", True):
+                break
+        except Exception as e:
+            fetch_err = str(e)
+            fetch_errors.append(f"{name}: {fetch_err}")
+            df = None
+
+    if df is None or getattr(df, "empty", True):
+        msg = fetch_err or "no data"
+        if fetch_errors:
+            msg = msg + " | " + " ; ".join(fetch_errors[:3])
+        return jsonify({"code": 500, "msg": f"K线抓取失败：{msg}", "data": None})
+    dc = _df_pick_col(df, "日期")
+    oc = _df_pick_col(df, "开盘")
+    cc = _df_pick_col(df, "收盘")
+    hc = _df_pick_col(df, "最高")
+    lc = _df_pick_col(df, "最低")
+    vc = _df_pick_col(df, "成交量")
+    # 有些环境下 akshare 返回的列名会出现编码乱码，
+    # 导致字符串匹配不到（例如不再包含“日期/开盘/收盘”这些子串）。
+    # stock_zh_a_hist 的列结构通常为：
+    # [日期, 股票代码, 开盘, 收盘, 最高, 最低, 成交量, ...]，
+    # 因此这里做列序号回退兜底。
+    if not dc or not oc or not cc or not hc or not lc or not vc:
+        # 如果是 stock_zh_a_hist_tx，列名通常是英文：date/open/close/high/low/amount
+        cols = list(df.columns)
+        lower = {str(c).lower(): c for c in cols}
+        dc_en = lower.get("date")
+        oc_en = lower.get("open")
+        cc_en = lower.get("close")
+        hc_en = lower.get("high")
+        lc_en = lower.get("low")
+        vc_en = lower.get("volume") or lower.get("amount")
+        if dc_en and oc_en and cc_en and hc_en and lc_en and vc_en:
+            dc, oc, cc, hc, lc, vc = dc_en, oc_en, cc_en, hc_en, lc_en, vc_en
+        else:
+            # 兜底：按常见顺序回退到“列序号”
+            # stock_zh_a_hist 由于编码乱码列名匹配失败，列序通常仍是：
+            # [日期, 股票代码, 开盘, 收盘, 最高, 最低, 成交量, ...]
+            if len(cols) >= 7:
+                dc = dc or cols[0]
+                oc = oc or cols[2]
+                cc = cc or cols[3]
+                hc = hc or cols[4]
+                lc = lc or cols[5]
+                vc = vc or cols[6]
+
+    if not dc or not oc or not cc or not hc or not lc or not vc:
+        return jsonify({"code": 500, "msg": "无法识别K线列", "data": None})
+    df = df.sort_values(dc).reset_index(drop=True)
+    win = df.tail(250)
+    try:
+        hi = float(win[hc].astype(float).max())
+        lo = float(win[lc].astype(float).min())
+        closes_all = [float(x) for x in df[cc].astype(float).tolist()]
+        last_close = closes_all[-1]
+        pct = round((last_close - lo) / (hi - lo) * 100, 2) if hi > lo else 50.0
+        pct = max(0.0, min(100.0, pct))
+    except Exception:
+        return jsonify({"code": 500, "msg": "K线解析失败", "data": None})
+    chart_n = min(90, len(closes_all))
+    chart_closes = [round(x, 3) for x in closes_all[-chart_n:]]
+    dates: list[str] = []
+    candle: list[list[float]] = []
+    volumes: list[float] = []
+    try:
+        for _, row in df.iterrows():
+            ds = row[dc]
+            dstr = str(ds)[:10] if ds is not None else ""
+            dates.append(dstr)
+            o = float(row[oc])
+            c = float(row[cc])
+            hi_ = float(row[hc])
+            lo_ = float(row[lc])
+            candle.append([round(o, 4), round(c, 4), round(lo_, 4), round(hi_, 4)])
+            if vc:
+                volumes.append(round(float(row[vc]), 2))
+            else:
+                volumes.append(0.0)
+    except Exception:
+        dates = []
+        candle = []
+        volumes = []
+    data_payload = {
+        "symbol": symbol,
+        "closes": chart_closes,
+        "dates": dates,
+        "candle": candle,
+        "volume": volumes,
+        "high_52w": round(hi, 2),
+        "low_52w": round(lo, 2),
+        "percentile": pct,
+        "last_close": round(last_close, 2),
+        "trade_days": int(len(df)),
+        "update_time": _now_str(),
+    }
+
+    # 写入缓存：减少频繁拉取导致的网络错误 / 超时
+    _STOCK_DAILY_BARS_CACHE[symbol] = {"ts": now_ts, "data": data_payload}
+
+    return jsonify({"code": 200, "msg": "success", "data": data_payload})
+
+
+@app.route("/api/market/a-overview", methods=["GET"])
+def market_a_share_overview():
+    """
+    创新/扩展：A 股市场总貌（上交所 stock_sse_summary + 深交所 stock_szse_summary）。
+    深交所需交易日 date，自动尝试今日与昨日。
+    """
+    try:
+        import akshare as ak
+    except ImportError:
+        return jsonify({"code": 503, "msg": "未安装 akshare，请 pip install -r requirements.txt", "data": None})
+    data = {"update_time": _now_str(), "sse": None, "szse": None, "szse_trade_date": None}
+    try:
+        df = ak.stock_sse_summary()
+        data["sse"] = _df_to_records(df)
+    except Exception as e:
+        data["sse_error"] = str(e)
+    dates = [time.strftime("%Y%m%d"), (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")]
+    for d in dates:
+        try:
+            df2 = ak.stock_szse_summary(date=d)
+            rec = _df_to_records(df2)
+            if rec:
+                data["szse"] = rec
+                data["szse_trade_date"] = d
+                break
+        except Exception as e:
+            data["szse_error"] = str(e)
+    return jsonify({"code": 200, "msg": "success", "data": data})
 
 
 @app.route("/api/topics/stock-insight", methods=["POST", "OPTIONS"])
@@ -477,7 +915,10 @@ def research_analyze():
     q = str(body.get("question") or "").strip()
     stock = {}
     try:
-        live = _fetch_stock_live(symbol)
+        if _is_a_share_6digit(symbol):
+            live = _fetch_a_share_quote(symbol)
+        else:
+            live = _fetch_stock_live(symbol)
         if isinstance(live, dict):
             stock = live
     except Exception:
@@ -553,6 +994,18 @@ def task(task_id: str):
     if not t:
         return jsonify({"error": "task not found"}), 404
     return jsonify(t)
+
+
+def _warm_a_share_search_cache():
+    """后台预热全市场名称列表，避免首个搜索请求长时间无响应。"""
+    time.sleep(1.5)
+    try:
+        _get_a_share_search_index()
+    except Exception:
+        pass
+
+
+threading.Thread(target=_warm_a_share_search_cache, daemon=True).start()
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-<view class="safe">
+<view class="chat-page-root">
   <view class="topbar topbar-chat">
     <view class="back-btn" bindtap="goBack">←</view>
     <view class="chat-brand">
@@ -39,7 +39,7 @@
       </view>
     </scroll-view>
 
-    <view class="chat-footer safe">
+    <view class="chat-footer">
       <scroll-view scroll-x class="qa-tags">
         <text class="qa-tag" wx:for="{{quickQuestions}}" wx:key="*this" bindtap="useQuickQuestion" data-q="{{item}}">{{item}}</text>
       </scroll-view>

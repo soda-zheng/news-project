@@ -1,5 +1,6 @@
 {
   "navigationBarTitleText": "AI智能股票问答",
-  "usingComponents": {}
+  "usingComponents": {},
+  "disableScroll": true
 }
 

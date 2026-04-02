@@ -1,5 +1,7 @@
 {
   "navigationStyle": "custom",
   "backgroundColor": "#F5F7FB",
-  "usingComponents": {}
+  "usingComponents": {
+    "ec-canvas": "/components/ec-canvas/ec-canvas"
+  }
 }
