@@ -3,6 +3,14 @@ from __future__ import annotations
 import json
 import os
 import re
+
+# 本地开发：backend/.env 中可配置 LLM_API_BASE / LLM_MODEL / LLM_API_KEY
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+except ImportError:
+    pass
 import threading
 import time
 import uuid
@@ -38,7 +46,14 @@ def _get_llm_env():
     }
 
 
-def _openai_compat_chat(messages: list[dict], max_tokens: int = 420, temperature: float = 0.4) -> str:
+def _openai_compat_chat(
+    messages: list[dict],
+    max_tokens: int = 420,
+    temperature: float = 0.4,
+    *,
+    json_mode: bool = False,
+    timeout_sec: int = 60,
+) -> str:
     env = _get_llm_env()
     api_base = env.get("api_base") or ""
     model = env.get("model") or ""
@@ -51,35 +66,116 @@ def _openai_compat_chat(messages: list[dict], max_tokens: int = 420, temperature
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    payload = {
+    payload: dict = {
         "model": model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
         "stream": False,
     }
-    r = SESSION.post(url, headers=headers, json=payload, timeout=40)
-    r.raise_for_status()
+    if json_mode:
+        # 通义 compatible-mode 与 OpenAI 对齐时支持 json_object，可显著减少「非 JSON」截断
+        payload["response_format"] = {"type": "json_object"}
+
+    r = SESSION.post(url, headers=headers, json=payload, timeout=timeout_sec)
+    try:
+        r.raise_for_status()
+    except requests.HTTPError as e:
+        hint = ""
+        try:
+            hint = (r.text or "")[:400]
+        except Exception:
+            pass
+        raise RuntimeError(f"LLM HTTP {r.status_code}: {hint or e}") from e
+
     data = r.json()
+    err = data.get("error")
+    if err:
+        raise RuntimeError(str(err))
     # OpenAI compatible
     content = (((data.get("choices") or [{}])[0] or {}).get("message") or {}).get("content")
     if not content:
-        raise RuntimeError(f"LLM empty content: {str(data)[:160]}")
+        raise RuntimeError(f"LLM empty content: {str(data)[:200]}")
     return str(content)
+
+
+def _strip_markdown_json_fence(text: str) -> str:
+    """去掉 ```json ... ``` 等包裹，保留内部文本。"""
+    s = str(text or "").strip()
+    if not s:
+        return s
+    m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", s, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    return s
 
 
 def _extract_json_object(text: str) -> dict | None:
     if not text:
         return None
+    s = _strip_markdown_json_fence(text)
+    start = s.find("{")
+    if start < 0:
+        return None
+    # 先尝试从首个 { 起解析完整对象（避免串里再含 } 时截断错误）
     try:
-        first = text.find("{")
-        last = text.rfind("}")
-        if first >= 0 and last > first:
-            obj = json.loads(text[first : last + 1])
+        obj, _ = json.JSONDecoder().raw_decode(s[start:])
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        pass
+    try:
+        last = s.rfind("}")
+        if last > start:
+            obj = json.loads(s[start : last + 1])
             return obj if isinstance(obj, dict) else None
     except Exception:
         return None
     return None
+
+
+def _llm_repair_insight_json(bad_text: str) -> dict | None:
+    """二次调用：把模型输出的杂乱文本压成严格 JSON（仍失败则 None）。"""
+    try:
+        snippet = str(bad_text or "").strip()
+        if len(snippet) > 6000:
+            snippet = snippet[:6000] + "…"
+        messages = [
+            {
+                "role": "system",
+                "content": "你只输出一个 JSON 对象，键必须为 aiInsightList、suggestionList 和 quickQuestionList，值均为中文字符串数组。"
+                "不要 Markdown、不要代码块、不要解释。",
+            },
+            {
+                "role": "user",
+                "content": "将以下内容整理成上述 JSON（若能直接解析则抽取数组）：\n\n" + snippet,
+            },
+        ]
+        try:
+            out = _openai_compat_chat(
+                messages, max_tokens=900, temperature=0.05, json_mode=True, timeout_sec=70
+            )
+        except RuntimeError:
+            out = _openai_compat_chat(
+                messages, max_tokens=900, temperature=0.05, json_mode=False, timeout_sec=70
+            )
+        return _extract_json_object(out)
+    except Exception:
+        return None
+
+
+def _invoke_llm_for_insight(messages: list[dict]) -> str:
+    """优先 json_object；若接口不支持则自动降级为非 JSON 模式。"""
+    try:
+        return _openai_compat_chat(
+            messages, max_tokens=1024, temperature=0.35, json_mode=True, timeout_sec=65
+        )
+    except RuntimeError as e:
+        err_txt = str(e).lower()
+        if "http 400" in err_txt or "response_format" in err_txt or "not support" in err_txt:
+            return _openai_compat_chat(
+                messages, max_tokens=1024, temperature=0.35, json_mode=False, timeout_sec=65
+            )
+        raise
 
 
 def _safe_bullets(items, max_items: int = 5):
@@ -1227,6 +1323,57 @@ def stock_insight():
     return jsonify({"code": 200, "msg": "success", "data": {"lines": lines, "source": "template"}})
 
 
+PERCENTILE_DEFINITION_CN = (
+    "近约250个交易日（约一年）窗口：取区间最低价与最高价，用最新收盘价在区间上的相对位置（百分比）；"
+    "非市盈率或估值分位。"
+)
+
+
+def _headlines_for_symbol(symbol: str, name: str, global_news: list, hot_rows: list) -> list[dict]:
+    """从全市场快讯里筛出标题/摘要疑似与本股相关的条目，供 LLM 做事件层输入；匹配失败不代表市场上真无新闻。"""
+    sym = str(symbol or "").strip()
+    nm = (str(name or "").strip()).replace(" ", "").replace("\u3000", "")
+    hits: list[dict] = []
+    seen: set[str] = set()
+
+    def push(title: str, source: str) -> None:
+        t = (title or "").strip()
+        if len(t) < 4 or t in seen:
+            return
+        seen.add(t)
+        hits.append({"title": t[:220], "source": str(source or "快讯")[:32]})
+
+    for r in hot_rows or []:
+        if not isinstance(r, dict):
+            continue
+        ld = str(r.get("leader") or "")
+        digits = "".join(ch for ch in ld if ch.isdigit())
+        code6 = digits[-6:] if len(digits) >= 6 else digits
+        if sym and code6 == sym:
+            pc = _to_float(r.get("pct_chg"), 0.0) or 0.0
+            hn = str(r.get("name") or nm or sym).strip()
+            push(f"热力榜：{hn}（{sym}）涨跌幅约 {pc:+.2f}%", "市场热力")
+
+    for it in global_news or []:
+        if not isinstance(it, dict):
+            continue
+        blob = f"{it.get('title') or ''}{it.get('summary') or ''}"
+        hit = bool(sym) and sym in blob
+        if not hit and nm and len(nm) >= 2 and nm in blob:
+            hit = True
+        if hit:
+            push(str(it.get("title") or it.get("summary") or "")[:200], str(it.get("source") or "快讯"))
+
+    return hits[:8]
+
+
+def _insight_response_meta(symbol_hit_count: int) -> dict:
+    return {
+        "percentileDefinition": PERCENTILE_DEFINITION_CN,
+        "symbolHeadlineCount": symbol_hit_count,
+    }
+
+
 @app.route("/api/research/stock-llm-insight", methods=["POST", "OPTIONS"])
 def stock_llm_insight():
     """
@@ -1248,12 +1395,17 @@ def stock_llm_insight():
     except Exception as e:
         quote = {}
 
-    # 2) 历史（K 线）
+    # 2) 历史（K 线）：优先与 /api/stock/daily-bars 共用内存缓存，保证分位/一年高低与 K 线图一致
     daily = None
-    try:
-        daily = _fetch_daily_bars_sina(symbol)
-    except Exception:
-        daily = None
+    now_bar_ts = time.time()
+    cached_bar = _STOCK_DAILY_BARS_CACHE.get(symbol)
+    if cached_bar and (now_bar_ts - cached_bar.get("ts", 0)) < _STOCK_DAILY_BARS_TTL_SEC:
+        daily = cached_bar.get("data")
+    if not daily or not isinstance(daily, dict) or not daily.get("dates") or not daily.get("candle"):
+        try:
+            daily = _fetch_daily_bars_sina(symbol)
+        except Exception:
+            daily = None
 
     # 3) 新闻趋势（用热点与快讯做近似输入）
     hot = []
@@ -1273,18 +1425,18 @@ def stock_llm_insight():
     except Exception:
         hot = []
 
-    # 如果新浪快讯获取失败也没关系，LLM 仍可基于行情+历史输出
+    # 如果新浪快讯获取失败也没关系，LLM 仍可基于行情+历史输出（多取几条以提高个股命中）
     global_news = []
     try:
-        items = _fetch_news_live(page=1, num=6) or []
-        global_news = items[:5]
+        items = _fetch_news_live(page=1, num=22) or []
+        global_news = items[:18]
     except Exception:
         global_news = []
 
     if not daily or not isinstance(daily, dict) or not daily.get("dates") or not daily.get("candle"):
         return jsonify({"code": 500, "msg": "无法获取历史K线数据（已尝试新浪兜底）", "data": None})
 
-    name = quote.get("name") or symbol
+    name = str(quote.get("name") or symbol or "").strip() or symbol
     pct_chg = float(quote.get("pct_chg") or 0.0)
     price = quote.get("price") or daily.get("last_close") or 0.0
 
@@ -1306,7 +1458,10 @@ def stock_llm_insight():
 
     hi_52w = daily.get("high_52w") or 0.0
     lo_52w = daily.get("low_52w") or 0.0
-    percentile = float(daily.get("percentile") or 0.0)
+    percentile = round(float(daily.get("percentile") or 0.0), 2)
+
+    symbol_headlines = _headlines_for_symbol(symbol, name, global_news, hot)
+    insight_meta = _insight_response_meta(len(symbol_headlines))
 
     # LLM 提示（要求输出 JSON）
     user_msg = {
@@ -1328,6 +1483,12 @@ def stock_llm_insight():
             "change_20d_pct": round(change_20, 2),
             "dates_tail": daily.get("dates", [])[-6:],
         },
+        "constraints": {
+            "percentile_definition": PERCENTILE_DEFINITION_CN,
+            "valuation_fields_missing": True,
+            "symbol_headlines_matched": len(symbol_headlines),
+        },
+        "recent_headlines_for_symbol": symbol_headlines,
         "news_trend": {
             "hot_topics": hot,
             "global_news_tail": [
@@ -1335,14 +1496,22 @@ def stock_llm_insight():
             ],
         },
         "task": {
-            "aiInsightList": "生成 3-5条简短研判：把行情/趋势/历史分位/新闻影响串起来，每条不超过60字",
+            "aiInsightList": "生成 3-5条简短研判：把行情/趋势/历史分位/10/20日动量串起来；若 recent_headlines_for_symbol 非空可点到为止提事件，每条不超过60字",
             "suggestionList": "生成 3条未持仓操作建议：包含观察要点与风控口径，每条不超过60字；不构成投资建议",
+            "quickQuestionList": "再生成 3个更聚焦该股票的追问问题（不构成投资建议）；每个问题不超过30字。每个问题必须与该股票的近一年分位/10/20日动量/52周回撤或关键支撑压力相关；并优先包含该股票简称(name)或至少包含“该股”。不要套用固定模板词（如“财报不及预期/同业对比/最大风险情景”）；若 recent_headlines_for_symbol 中不包含“财报/业绩/公告/年报/一季报/利润”等关键词，则禁止出现财报类措辞。禁止出现连续6位数字。"
         },
     }
 
     system_msg = (
-        "你是金融研究助理。输出必须是合法 JSON，且只包含 keys: aiInsightList 和 suggestionList。"
-        "每个 value 都是字符串数组。禁止输出 Markdown。"
+        "你是金融研究助理。用户给的是该股客观数据 JSON。"
+        "你必须只输出一个 JSON 对象，且仅含键 aiInsightList、suggestionList、quickQuestionList；值均为中文字符串数组。"
+        "aiInsightList：3-5 条；suggestionList：3 条「未持仓」建议，须至少一条明确写出股票简称或代码；每条≤60字。"
+        "quickQuestionList：3 条；每条≤30字；每条必须包含该股票简称(name)或“该股”，且必须与行情/历史特征相关；禁止使用与该股票无关的泛化问题。"
+        "historical.percentile 的含义见 constraints.percentile_definition。引用分位时仅可使用与 historical.percentile 相同的数值（可格式化为两位小数，如 52.35），禁止改用其它分位。"
+        "若 constraints.valuation_fields_missing 为 true：禁止使用「估值偏高/偏低/合理/泡沫/中性偏高/市盈率/PE」等字样。"
+        "若 recent_headlines_for_symbol 为空数组：禁止断言「无热点新闻」「板块关注度低」「缺乏资金」等；应表述为未在给定快讯列表中检索到该股相关标题，结论以技术面为主。"
+        "若 recent_headlines_for_symbol 非空：可简要引用其中事实，勿编造未出现的公告或数据。"
+        "禁止 Markdown、禁止代码围栏、禁止输出 JSON 以外的任何字符。"
     )
 
     messages = [
@@ -1351,38 +1520,92 @@ def stock_llm_insight():
     ]
 
     try:
-        content = _openai_compat_chat(messages, max_tokens=420, temperature=0.4)
+        content = _invoke_llm_for_insight(messages)
         obj = _extract_json_object(content) or {}
-        ai = obj.get("aiInsightList")
-        sug = obj.get("suggestionList")
-        ai_list = _safe_bullets(ai, max_items=5)
-        sug_list = _safe_bullets(sug, max_items=3)
-        if not ai_list:
-            ai_list = [
-                f"{name} 当前分位{percentile:.0f}%，短期呈现区间/动量偏向（基于近10/20日收益）。",
-                "建议结合回撤承接与量价配合，避免单一指标做决定。",
-                "如板块情绪走弱，短线波动可能放大。"
+        ai_list = _safe_bullets(obj.get("aiInsightList"), max_items=5)
+        sug_list = _safe_bullets(obj.get("suggestionList"), max_items=3)
+        quick_list = _safe_bullets(obj.get("quickQuestionList"), max_items=3)
+
+        if (not ai_list or not sug_list) and content:
+            fixed = _llm_repair_insight_json(content)
+            if isinstance(fixed, dict):
+                if not ai_list:
+                    ai_list = _safe_bullets(fixed.get("aiInsightList"), max_items=5)
+                if not sug_list:
+                    sug_list = _safe_bullets(fixed.get("suggestionList"), max_items=3)
+                if not quick_list:
+                    quick_list = _safe_bullets(fixed.get("quickQuestionList"), max_items=3)
+
+        if not ai_list or not sug_list:
+            messages_fix = messages + [
+                {"role": "assistant", "content": (content or "")[:6500]},
+                {
+                    "role": "user",
+                    "content": (
+                        "上一段无法解析为 JSON。请仅输出一个 JSON 对象，键 aiInsightList（3-5条）、suggestionList（3条）与 quickQuestionList（3条）。"
+                        f"内容必须针对 {name}（{symbol}），并体现近一年分位{percentile:.2f}%（勿改此分位）、涨跌幅{pct_chg:+.2f}%、"
+                        f"10日收益约{change_10:+.2f}%与20日约{change_20:+.2f}%。不要其它文字。"
+                    ),
+                },
             ]
-        if not sug_list:
-            sug_list = [
-                "未持仓建议等待回撤后的确认信号，再考虑分批试仓。",
-                "若突破关键位置但量能不跟随，降低风险暴露并设止损位。",
-                "以中短周期为前提制定计划，避免追涨后被动。"
+            content2 = _invoke_llm_for_insight(messages_fix)
+            obj2 = _extract_json_object(content2) or {}
+            if not ai_list:
+                ai_list = _safe_bullets(obj2.get("aiInsightList"), max_items=5)
+            if not sug_list:
+                sug_list = _safe_bullets(obj2.get("suggestionList"), max_items=3)
+            if not quick_list:
+                quick_list = _safe_bullets(obj2.get("quickQuestionList"), max_items=3)
+
+        if not ai_list or not sug_list:
+            raise RuntimeError("LLM 多次重试后仍无法得到有效的 aiInsightList/suggestionList")
+
+        if not quick_list:
+            quick_list = [
+                "结合当前分位与10/20日动量，下一步走势更偏哪边？",
+                "52周回撤下，最该盯的支撑/压力信号是什么？",
+                "若继续偏弱，未持仓者如何控风险与等信号？"
             ]
-        return jsonify({"code": 200, "msg": "success(llm)", "data": {"aiInsightList": ai_list, "suggestionList": sug_list}})
+
+        payload_out = {
+            "aiInsightList": ai_list,
+            "suggestionList": sug_list,
+            "quickQuestionList": quick_list,
+            "meta": insight_meta,
+        }
+        return jsonify({"code": 200, "msg": "success(llm)", "data": payload_out})
     except Exception as e:
-        # LLM 不可用时退回模板（不影响页面展示）
+        # LLM 不可用时退回模板：仍返回 code=200，便于前端展示；具体原因放在 msg 便于排查
         lines = [
             f"{name} 当前涨跌幅 {pct_chg:+.2f}%，结合历史分位与近10/20日动量，短期以结构性波动为主。",
-            f"当前处于近一年分位 {percentile:.0f}%，上行需看趋势延续，下行需关注回撤承接。",
-            "新闻面以热点/快讯情绪为参考，建议优先看资金与板块联动。"
+            f"当前处于近一年收盘价区间相对分位 {percentile:.2f}%（非估值分位），上行需看趋势延续，下行需关注回撤承接。",
+            "新闻面以热点/快讯为参考；未在给定快讯列表中检索到该股相关标题时，不宜断言「无热点」。"
         ]
         suggestions = [
             "未持仓：等待关键位附近的放量/承接确认，再分批参与。",
             "设置明确的止损/止盈规则，避免单次波动影响整体计划。",
             "若走势与量能背离，提高观望权重并减少追涨。"
         ]
-        return jsonify({"code": 500, "msg": f"LLM失败：{e}", "data": {"aiInsightList": lines[:5], "suggestionList": suggestions[:3]}})
+        quick_list = [
+            "结合当前分位与10/20日动量，下一步走势更偏哪边？",
+            "52周回撤下，最该盯的支撑/压力信号是什么？",
+            "若继续偏弱，未持仓者如何控风险与等信号？"
+        ]
+        err_hint = str(e).replace("\n", " ").strip()
+        if len(err_hint) > 180:
+            err_hint = err_hint[:180] + "…"
+        return jsonify(
+            {
+                "code": 200,
+                "msg": f"success(template_llm_err: {err_hint})",
+                "data": {
+                    "aiInsightList": lines[:5],
+                    "suggestionList": suggestions[:3],
+                    "quickQuestionList": quick_list,
+                    "meta": insight_meta,
+                },
+            }
+        )
 
 
 @app.route("/api/research/analyze", methods=["POST", "OPTIONS"])

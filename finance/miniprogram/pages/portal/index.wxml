@@ -164,24 +164,28 @@
           <text>历史偏低</text>
           <text>历史偏高</text>
         </view>
+        <view class="percentile-def-hint" wx:if="{{percentileDefHint}}">{{percentileDefHint}}</view>
       </view>
     </view>
     <view class="stock-quick-row">
       <view
-        class="stock-quick-btn"
-        data-q="若接下来财报不及预期，对当前估值影响最大的指标是什么？"
-        bindtap="onStockQuickAsk"
-      >财报不及预期</view>
-      <view
-        class="stock-quick-btn"
-        data-q="与同业相比，当前股价反映的优势与风险各是什么？"
-        bindtap="onStockQuickAsk"
-      >同业对比要点</view>
-      <view
-        class="stock-quick-btn"
-        data-q="基于当前分位与波动，短期最需要警惕的一种情景是什么？"
-        bindtap="onStockQuickAsk"
-      >最大风险情景</view>
+        wx:if="{{stockQuickQuestions && stockQuickQuestions.length}}"
+      >
+        <view
+          style="margin-bottom: 0;"
+          wx:for="{{stockQuickQuestions}}"
+          wx:key="*this"
+          data-q="{{item}}"
+          bindtap="onStockQuickAsk"
+        >
+          <view class="stock-quick-btn">{{item}}</view>
+        </view>
+      </view>
+      <view wx:else>
+        <view class="stock-quick-btn" data-q="结合当前分位与10/20日动量，下一步走势更偏哪边？" bindtap="onStockQuickAsk">走势动量追问</view>
+        <view class="stock-quick-btn" data-q="52周回撤下，最该盯的支撑/压力信号是什么？" bindtap="onStockQuickAsk">支撑压力信号</view>
+        <view class="stock-quick-btn" data-q="若继续偏弱，未持仓者如何控风险与等信号？" bindtap="onStockQuickAsk">偏弱风险控法</view>
+      </view>
     </view>
     <view class="kline-container">
       <view class="kline-header">
@@ -288,7 +292,7 @@
         <text class="chat-header-title">AI 智能问答</text>
         <view class="chat-header-side chat-header-spacer"></view>
       </view>
-      <scroll-view class="chat-full-messages" scroll-y>
+      <scroll-view class="chat-full-messages" scroll-y scroll-into-view="{{chatScrollToId}}">
         <view wx:for="{{chatMessages}}" wx:key="index" id="msg-{{index}}" class="message {{item.role === 'user' ? 'user-msg' : 'ai-msg'}}">
           <view class="bubble" hover-class="bubble-press" hover-stay-time="80">{{item.text}}</view>
         </view>

@@ -8,6 +8,26 @@ const {
 } = require('../../utils/api')
 const { getCodeByKeyword } = require('../../utils/helpers')
 
+const DEFAULT_PERCENTILE_HINT =
+  '分位说明：近约250个交易日最低价—最高价区间内，按最新「收盘价」相对位置（百分比）；不是市盈率分位。'
+
+const DEFAULT_STOCK_QUICK_QUESTIONS = [
+  '结合当前分位与10/20日动量，下一步走势更偏哪边？',
+  '52周回撤下，最该盯的支撑/压力信号是什么？',
+  '若继续偏弱，未持仓者如何控风险与等信号？'
+]
+
+/** 与后端 daily-bars / LLM 输入统一：保留两位小数展示，游标用未截断数值 */
+function percentileUiFromNumber(p) {
+  const x = Number(p)
+  if (!Number.isFinite(x)) return null
+  const cap = Math.min(100, Math.max(0, x))
+  const r2 = Math.round(cap * 100) / 100
+  const label = `${r2.toFixed(2)}%`
+  const sub = r2 > 50 ? '中位偏上' : r2 < 50 ? '中位偏下' : '接近中位'
+  return { label, marker: cap, barWidth: r2, sub }
+}
+
 const topicDataMap = {
   mixue: {
     title: '蜜雪冰城全球门店6万，海外业务净增长',
@@ -479,8 +499,10 @@ Page({
     percentileMarkerLeft: 0,
     percentileLabel: '--',
     percentileSub: '',
+    percentileDefHint: DEFAULT_PERCENTILE_HINT,
     trendText: '—',
     volText: '—',
+    stockQuickQuestions: DEFAULT_STOCK_QUICK_QUESTIONS.slice(),
     aiInsightList: [],
     suggestionList: [],
     ecKline: { lazyLoad: true },
@@ -495,6 +517,7 @@ Page({
     klineViewMinCandles: 18,
     klineViewMaxCandlesLimit: 220,
     chatInput: '',
+    chatScrollToId: '',
     chatMessages: [
       {
         role: 'ai',
@@ -626,6 +649,11 @@ Page({
   },
 
   switchPage(pageId) {
+    const fromPage = this.data.activePage
+    // 仅当从个股进入 chat 后，返回个股时才跳过 AI 重新生成；切到其它页面则清除标记
+    if (pageId !== 'stock' && pageId !== 'chat' && this._chatReturnSkipAiRegen) {
+      this._chatReturnSkipAiRegen = false
+    }
     if (pageId !== 'stock') {
       if (this._stockSuggestTimer) {
         clearTimeout(this._stockSuggestTimer)
@@ -641,14 +669,34 @@ Page({
     if (main.includes(pageId)) patch.tabSelected = pageId
     this.setData(patch)
     if (pageId === 'chat') {
+      // 记录进入 chat 之前的页面，返回时回到原页面而不是固定首页
+      if (fromPage && fromPage !== 'chat') this._chatReturnPage = fromPage
       this.setData({ chatInputFocus: false })
+      // 打开聊天页时自动定位到最后一条消息
+      const lastIdx = (this.data.chatMessages || []).length - 1
+      if (lastIdx >= 0) this.setData({ chatScrollToId: `msg-${lastIdx}` })
       this._layoutChatArea()
+      // 从个股页进入聊天：返回时先跳过 LLM 重新生成
+      if (fromPage === 'stock') this._chatReturnSkipAiRegen = true
     }
     if (pageId === 'stock') {
       const k = resolveStockKey(this.data.stockSearchInput) || normalizeToAshare6(this.data.stockSearchInput) || ''
       if (isAshare6digit(k)) {
-        this.updateStockUI(this.data.currentStock)
-        this.refreshLiveQuote(k)
+        const skipKlineAi = this._chatReturnSkipAiRegen === true
+        if (skipKlineAi) {
+          // 从 chat 返回 stock：保持原屏内容，不做任何刷新，避免触发“重新生成分析”的观感
+          this._chatReturnSkipAiRegen = false
+          return
+        } else {
+          // 从 chat 返回时跳过，避免重复生成；其它场景仍保证 UI 正确刷新
+          const hasAi =
+            Array.isArray(this.data.aiInsightList) &&
+            this.data.aiInsightList.length > 0 &&
+            Array.isArray(this.data.suggestionList) &&
+            this.data.suggestionList.length > 0
+          if (!hasAi) this.updateStockUI(this.data.currentStock)
+        }
+        this.refreshLiveQuote(k, { skipKlineAi: false })
       }
     }
   },
@@ -743,24 +791,35 @@ Page({
   },
 
   onBackChat() {
-    this.switchPage('home')
+    const backTo = this._chatReturnPage || 'home'
+    this.switchPage(backTo)
   },
 
-  refreshLiveQuote(key) {
+  refreshLiveQuote(key, opts) {
+    const skipKlineAi = opts && opts.skipKlineAi === true
     if (!isAshare6digit(key)) return
     getQuote(key)
       .then((res) => {
         if (res.code !== 200 || !res.data) {
           wx.showToast({ title: String(res.msg || '行情失败').slice(0, 18), icon: 'none' })
           const cur = resolveStockKey(this.data.stockSearchInput) || normalizeToAshare6(this.data.stockSearchInput) || ''
-          if (cur === key) this._loadKlineForSymbol(key)
+          if (cur === key && !skipKlineAi) this._loadKlineForSymbol(key)
           return
         }
         const cur = resolveStockKey(this.data.stockSearchInput) || normalizeToAshare6(this.data.stockSearchInput) || ''
         if (cur !== key) return
         const merged = mergeQuoteIntoStock(stockBaseForKey(key), res)
+        let prevAi = null
+        let prevSug = null
+        if (skipKlineAi) {
+          prevAi = this.data.aiInsightList
+          prevSug = this.data.suggestionList
+        }
         this.updateStockUI(merged)
-        this._loadKlineForSymbol(key)
+        if (skipKlineAi && prevAi && prevSug) {
+          this.setData({ aiInsightList: prevAi, suggestionList: prevSug })
+        }
+        if (!skipKlineAi) this._loadKlineForSymbol(key)
       })
       .catch(() => {
         wx.showToast({
@@ -769,15 +828,16 @@ Page({
           duration: 2800
         })
         const cur = resolveStockKey(this.data.stockSearchInput) || normalizeToAshare6(this.data.stockSearchInput) || ''
-        if (cur === key) this._loadKlineForSymbol(key)
+        if (cur === key && !skipKlineAi) this._loadKlineForSymbol(key)
       })
   },
 
   onStockQuickAsk(e) {
-    const q = e.currentTarget.dataset.q
-    if (!q) return
+    const q0 = e.currentTarget.dataset.q
+    if (!q0) return
+
     this.switchPage('chat')
-    this.setData({ chatInput: q, chatInputFocus: true })
+    this.setData({ chatInput: String(q0), chatInputFocus: true })
   },
 
   onChatChipTap(e) {
@@ -796,15 +856,21 @@ Page({
       return
     }
     const msgs = this.data.chatMessages.concat([{ role: 'user', text }])
-    this.setData({ chatMessages: msgs, chatInput: '' })
+    this.setData({
+      chatMessages: msgs,
+      chatInput: '',
+      chatScrollToId: `msg-${msgs.length - 1}`
+    })
     postResearchAnalyze({ symbol: code, question: text })
       .then((res) => {
         const summary = res && res.code === 200 && res.data ? res.data.summary : ''
         const reply = summary || '暂无法生成回答，请检查后端与 LLM 配置。'
-        this.setData({ chatMessages: msgs.concat([{ role: 'ai', text: reply }]) })
+        const nextMsgs = msgs.concat([{ role: 'ai', text: reply }])
+        this.setData({ chatMessages: nextMsgs, chatScrollToId: `msg-${nextMsgs.length - 1}` })
       })
       .catch(() => {
-        this.setData({ chatMessages: msgs.concat([{ role: 'ai', text: '请求失败，请检查网络与后端。' }]) })
+        const nextMsgs = msgs.concat([{ role: 'ai', text: '请求失败，请检查网络与后端。' }])
+        this.setData({ chatMessages: nextMsgs, chatScrollToId: `msg-${nextMsgs.length - 1}` })
       })
   },
 
@@ -1026,7 +1092,11 @@ Page({
     }
     // 重新加载 K 线前，先清理旧图表，避免旧 canvas 尺寸/绘制残留
     this._disposeKlineChartIfAny()
-    this.setData({ klinePlaceholderText: '加载K线…' })
+    this.setData({
+      klinePlaceholderText: '加载K线…',
+      aiInsightList: ['正在生成 AI 分析…'],
+      suggestionList: ['请稍候…']
+    })
     getStockDailyBars(c)
       .then((res) => {
         // 旧请求返回了就丢弃，避免并发导致“多层/错位”
@@ -1038,41 +1108,50 @@ Page({
             // 不要过度截断错误信息：用于定位后端/AKShare 的失败原因
             klinePlaceholderText: String(res.msg || 'K线失败').slice(0, 180)
           })
+          this._refreshLLMInsightIfPossible(this.data.currentStock)
           return
         }
         const d = res.data
         if (!d.dates || !d.candle || !d.dates.length) {
           this._disposeKlineChartIfAny()
           this.setData({ klineShowEcharts: false, klinePlaceholderText: '无K线数据' })
+          this._refreshLLMInsightIfPossible(this.data.currentStock)
           return
         }
         const cur = this.data.currentStock || {}
         const tv = computeTrendVolFromCandles(d.candle || [])
+        const rawPct = Number(d.percentile)
+        const pctUi = percentileUiFromNumber(rawPct)
         const merged = {
           ...cur,
           high: d.high_52w,
           low: d.low_52w,
-          percentile: Math.round(d.percentile),
+          percentile: rawPct,
           trend: tv.trend,
           volatility: tv.volatility
         }
-        const p = Math.round(d.percentile)
-        this.setData({
-          klineShowEcharts: true,
-          klinePlaceholderText: '',
-          // 切换标的时恢复默认缩放，避免上一轮的放大/缩小影响观感
-          klineViewMaxCandles: this.data.klineViewBaseMaxCandles || 90,
-          currentStock: merged,
-          high52w: `¥${d.high_52w}`,
-          low52w: `¥${d.low_52w}`,
-          percentileText: `${p}%`,
-          percentileBarWidth: p,
-          percentileMarkerLeft: Math.min(100, Math.max(0, p)),
-          percentileLabel: `${p}%`,
-          percentileSub: p > 50 ? '中位偏上' : '中位偏下',
-          trendText: tv.trend,
-          volText: tv.volatility
-        })
+        this.setData(
+          {
+            klineShowEcharts: true,
+            klinePlaceholderText: '',
+            // 切换标的时恢复默认缩放，避免上一轮的放大/缩小影响观感
+            klineViewMaxCandles: this.data.klineViewBaseMaxCandles || 90,
+            currentStock: merged,
+            high52w: `¥${d.high_52w}`,
+            low52w: `¥${d.low_52w}`,
+            percentileText: pctUi ? pctUi.label : '--',
+            percentileBarWidth: pctUi ? pctUi.barWidth : 0,
+            percentileMarkerLeft: pctUi ? Math.min(100, Math.max(0, pctUi.marker)) : 0,
+            percentileLabel: pctUi ? pctUi.label : '--',
+            percentileSub: pctUi ? pctUi.sub : '',
+            trendText: tv.trend,
+            volText: tv.volatility
+          },
+          () => {
+            // K 线与「历史位置」已对齐同一套 daily-bars 数据后再拉 LLM，避免分位与文案不一致
+            this._refreshLLMInsightIfPossible(merged)
+          }
+        )
         this._klineInitRetryCount = 0
         // 用自绘 K 线 canvas 替代 ECharts
         this._klineSource = d
@@ -1087,6 +1166,7 @@ Page({
           klineShowEcharts: false,
           klinePlaceholderText: '网络错误，无法加载K线'
         })
+        this._refreshLLMInsightIfPossible(this.data.currentStock)
       })
   },
 
@@ -1398,8 +1478,10 @@ Page({
       percentileMarkerLeft: 0,
       percentileLabel: '--',
       percentileSub: '',
+      percentileDefHint: DEFAULT_PERCENTILE_HINT,
       trendText: '—',
       volText: '—',
+      stockQuickQuestions: DEFAULT_STOCK_QUICK_QUESTIONS.slice(),
       aiInsightList: [],
       suggestionList: [],
       klineShowEcharts: false,
@@ -1440,8 +1522,8 @@ Page({
           : `${stock.change}%`
         : '--'
     const priceStr = hasPrice ? `¥${stock.price}` : '¥--'
-    const pRounded = Math.round(Number(stock.percentile) || 0)
     const hasPct = stock.percentile != null && stock.percentile !== '' && Number.isFinite(Number(stock.percentile))
+    const pctUi = hasPct ? percentileUiFromNumber(stock.percentile) : null
 
     this.setData({
       currentStock: stock,
@@ -1453,18 +1535,19 @@ Page({
       stockDetail: detail,
       high52w: stock.high ? `¥${stock.high}` : '¥--',
       low52w: stock.low ? `¥${stock.low}` : '¥--',
-      percentileText: hasPct ? `${pRounded}%` : '--',
-      percentileBarWidth: hasPct ? pRounded : 0,
-      percentileMarkerLeft: hasPct ? Math.min(100, Math.max(0, pRounded)) : 0,
-      percentileLabel: hasPct ? `${pRounded}%` : '--',
-      percentileSub: !hasPct ? '' : pRounded > 50 ? '中位偏上' : '中位偏下',
+      percentileText: pctUi ? pctUi.label : '--',
+      percentileBarWidth: pctUi ? pctUi.barWidth : 0,
+      percentileMarkerLeft: pctUi ? Math.min(100, Math.max(0, pctUi.marker)) : 0,
+      percentileLabel: pctUi ? pctUi.label : '--',
+      percentileSub: pctUi ? pctUi.sub : '',
       trendText: stock.trend || '—',
       volText: stock.volatility || '—',
+      // 切换股票时先重置为默认追问，避免短暂显示上一只股票的追问
+      stockQuickQuestions: DEFAULT_STOCK_QUICK_QUESTIONS.slice(),
       aiInsightList: [],
       suggestionList: []
     })
-
-    this._refreshLLMInsightIfPossible(stock)
+    // AI 研判在 K 线 daily-bars 成功并写入分位后再请求，避免与「历史位置」口径不一致；见 _loadKlineForSymbol
   },
 
   _refreshLLMInsightIfPossible(stock) {
@@ -1480,19 +1563,42 @@ Page({
       postStockLLMInsight({ symbol: code })
         .then((res) => {
           if (seq !== this._aiInsightReqSeq) return
-          if (!res || res.code !== 200 || !res.data) {
+          const curCode = String((this.data.currentStock && this.data.currentStock.code) || '').trim()
+          // 切股后旧请求返回：直接丢弃，避免把上一只股票的问题写回当前页面
+          if (curCode !== code) return
+          const payload = res && res.data
+          let aiInsightList = payload && Array.isArray(payload.aiInsightList) ? payload.aiInsightList : []
+          let suggestionList = payload && Array.isArray(payload.suggestionList) ? payload.suggestionList : []
+          let quickQuestionList = payload && Array.isArray(payload.quickQuestionList) ? payload.quickQuestionList : []
+          const meta = payload && payload.meta && typeof payload.meta === 'object' ? payload.meta : {}
+          const pdef =
+            meta.percentileDefinition != null && String(meta.percentileDefinition).trim()
+              ? String(meta.percentileDefinition).slice(0, 360)
+              : DEFAULT_PERCENTILE_HINT
+          // 后端在 LLM 失败时可能仍返回 code=500 但附带模板化 aiInsightList/suggestionList，前端应展示
+          if (aiInsightList.length || suggestionList.length) {
             this.setData({
-              aiInsightList: ['分析暂不可用（请检查后端服务与 LLM 配置）'],
-              suggestionList: ['—']
+              aiInsightList,
+              suggestionList,
+              percentileDefHint: pdef,
+              stockQuickQuestions:
+                quickQuestionList.length > 0 ? quickQuestionList : this.data.stockQuickQuestions
             })
             return
           }
-          const aiInsightList = Array.isArray(res.data.aiInsightList) ? res.data.aiInsightList : []
-          const suggestionList = Array.isArray(res.data.suggestionList) ? res.data.suggestionList : []
-          this.setData({ aiInsightList, suggestionList })
+          const tip = res && res.msg ? String(res.msg).slice(0, 160) : '分析暂不可用（请检查网络、后端与 LLM 环境变量）'
+          this.setData({
+            aiInsightList: [tip],
+            suggestionList: ['—'],
+            stockQuickQuestions:
+              quickQuestionList.length > 0 ? quickQuestionList : this.data.stockQuickQuestions,
+            percentileDefHint: pdef
+          })
         })
         .catch(() => {
           if (seq !== this._aiInsightReqSeq) return
+          const curCode = String((this.data.currentStock && this.data.currentStock.code) || '').trim()
+          if (curCode !== code) return
           this.setData({
             aiInsightList: ['分析请求失败，请检查网络与后端'],
             suggestionList: ['—']
