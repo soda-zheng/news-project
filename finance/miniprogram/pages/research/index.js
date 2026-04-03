@@ -1,10 +1,9 @@
-const { stockData, hotTags, hotTopicsTop10, featuredNews } = require('../../utils/data')
+const { stockShell, hotTags, hotTopicsTop10, featuredNews } = require('../../utils/data')
 const { getHotTopics, getHomeNews } = require('../../utils/api')
 const { getSelectedCode, setSelectedCode, normalizeCode } = require('../../utils/state')
 
 function pickStock(code) {
-  const c = String(code || '').trim()
-  return stockData[c] || stockData['300750']
+  return stockShell(code)
 }
 
 Page({
@@ -12,7 +11,7 @@ Page({
     hotTags,
     hotTopicsTop10,
     featuredNews,
-    heroStock: pickStock('300750'),
+    heroStock: pickStock(''),
     loading: false,
     errorText: ''
   },
@@ -34,7 +33,7 @@ Page({
         featuredNews: nextNews.length ? nextNews : featuredNews
       })
     } catch (e) {
-      this.setData({ errorText: '已回退为本地演示数据' })
+      this.setData({ errorText: '热点/新闻加载失败' })
     } finally {
       this.setData({ loading: false })
     }

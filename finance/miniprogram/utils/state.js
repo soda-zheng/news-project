@@ -9,8 +9,7 @@ function getSelectedCode() {
   const app = getApp()
   const globalCode = app && app.globalData ? app.globalData.selectedCode : ''
   const stored = wx.getStorageSync('selectedCode')
-  const code = normalizeCode(globalCode || stored || '300750') || '300750'
-  return code
+  return normalizeCode(globalCode || stored || '') || ''
 }
 
 function setSelectedCode(code) {

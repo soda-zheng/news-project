@@ -1,11 +1,10 @@
-const { stockData } = require('../../utils/data')
+const { stockShell } = require('../../utils/data')
 const { getCodeByKeyword } = require('../../utils/helpers')
 const { getQuote, postResearchAnalyze } = require('../../utils/api')
 const { getSelectedCode, setSelectedCode, normalizeCode } = require('../../utils/state')
 
 function pickStock(code) {
-  const c = String(code || '').trim()
-  return stockData[c] || stockData['300750']
+  return stockShell(code)
 }
 
 function buildId() {
@@ -34,8 +33,8 @@ function buildAnswer(stock, question) {
 Page({
   data: {
     keyword: '',
-    currentCode: '300750',
-    current: pickStock('300750'),
+    currentCode: '',
+    current: pickStock(''),
     question: '',
     messages: [],
     toViewId: '',
@@ -45,7 +44,7 @@ Page({
   onLoad(query) {
     const qCode = query && query.code ? String(query.code) : ''
     const code = normalizeCode(qCode) || getSelectedCode()
-    this.applyCode(code)
+    if (code) this.applyCode(code)
     this.bootstrapChat(pickStock(code))
   },
   onKeywordInput(e) {
@@ -58,6 +57,10 @@ Page({
     const input = String(this.data.keyword || '').trim()
     if (!input) return
     const code = normalizeCode(getCodeByKeyword(input) || input)
+    if (!code) {
+      wx.showToast({ title: '请输入有效 A 股代码', icon: 'none' })
+      return
+    }
     this.applyCode(code)
     const next = await this.enrichCurrentStock(code)
     this.bootstrapChat(next)
@@ -114,17 +117,18 @@ Page({
     wx.reLaunch({ url: '/pages/portal/index' })
   },
   applyCode(code) {
-    const c = normalizeCode(code) || '300750'
-    setSelectedCode(c)
+    const c = normalizeCode(code) || ''
+    if (c) setSelectedCode(c)
     this.setData({
       currentCode: c,
       current: pickStock(c),
       keyword: c
     })
-    void this.enrichCurrentStock(c)
+    if (c) void this.enrichCurrentStock(c)
   },
   async enrichCurrentStock(code) {
     const c = normalizeCode(code) || this.data.currentCode
+    if (!c) return pickStock('')
     const fallback = pickStock(c)
     try {
       const res = await getQuote(c)

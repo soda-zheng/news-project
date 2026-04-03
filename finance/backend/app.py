@@ -27,6 +27,73 @@ _STOCK_DAILY_BARS_CACHE: dict[str, dict] = {}
 _STOCK_DAILY_BARS_TTL_SEC = 60 * 60  # 1 小时
 
 
+def _get_llm_env():
+    # 兼容用户在环境变量中提供 LLM_* 配置（不在代码里写 key）
+    return {
+        "provider": str(os.environ.get("LLM_PROVIDER") or "openai_compat"),
+        "use_local": str(os.environ.get("LLM_USE_LOCAL") or "0"),
+        "api_base": str(os.environ.get("LLM_API_BASE") or ""),
+        "model": str(os.environ.get("LLM_MODEL") or ""),
+        "api_key": str(os.environ.get("LLM_API_KEY") or ""),
+    }
+
+
+def _openai_compat_chat(messages: list[dict], max_tokens: int = 420, temperature: float = 0.4) -> str:
+    env = _get_llm_env()
+    api_base = env.get("api_base") or ""
+    model = env.get("model") or ""
+    api_key = env.get("api_key") or ""
+    if not api_base or not model or not api_key:
+        raise RuntimeError("LLM env not configured (LLM_API_BASE/LLM_MODEL/LLM_API_KEY)")
+
+    url = api_base.rstrip("/") + "/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+    r = SESSION.post(url, headers=headers, json=payload, timeout=40)
+    r.raise_for_status()
+    data = r.json()
+    # OpenAI compatible
+    content = (((data.get("choices") or [{}])[0] or {}).get("message") or {}).get("content")
+    if not content:
+        raise RuntimeError(f"LLM empty content: {str(data)[:160]}")
+    return str(content)
+
+
+def _extract_json_object(text: str) -> dict | None:
+    if not text:
+        return None
+    try:
+        first = text.find("{")
+        last = text.rfind("}")
+        if first >= 0 and last > first:
+            obj = json.loads(text[first : last + 1])
+            return obj if isinstance(obj, dict) else None
+    except Exception:
+        return None
+    return None
+
+
+def _safe_bullets(items, max_items: int = 5):
+    out = []
+    if isinstance(items, list):
+        for x in items:
+            s = str(x).strip()
+            if s:
+                out.append(s[:80])
+            if len(out) >= max_items:
+                break
+    return out
+
+
 def _now_str() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
@@ -709,6 +776,205 @@ def _df_pick_col(df, *names: str):
     return None
 
 
+def _sina_symbol_prefix(code6: str) -> str:
+    # 新浪日线/分钟 K 接口通常需要 sh/sz 前缀
+    c = str(code6).strip()
+    return ("sh" if c.startswith(("6", "9")) else "sz") + c
+
+
+def _parse_maybe_timestamp_to_ymd(day: object) -> str:
+    """
+    尝试把新浪返回的 day 字段解析成 YYYY-MM-DD。
+    新浪接口实际返回可能是：日期字符串 / Unix 秒 / Unix 毫秒 / 带数字包装字符串。
+    """
+    if day is None:
+        return ""
+    if isinstance(day, (int, float)):
+        ts = int(day)
+        # 10位通常是秒；13位通常是毫秒
+        if ts > 10_000_000_000:
+            ts = ts // 1000
+        try:
+            return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+        except Exception:
+            return ""
+
+    s = str(day).strip()
+    if not s:
+        return ""
+    # 常见 YYYY-MM-DD 或 YYYY-MM-DD HH:mm
+    if "-" in s:
+        return s[:10]
+    # YYYYMMDD
+    if s.isdigit() and len(s) == 8:
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+
+    # 兜底：提取 10/13 位数字当作时间戳
+    m = re.search(r"(\d{10,13})", s)
+    if m:
+        ts = int(m.group(1))
+        if ts > 10_000_000_000:
+            ts = ts // 1000
+        try:
+            return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+        except Exception:
+            return ""
+    return s[:10]
+
+
+def _fetch_daily_bars_sina(symbol: str) -> dict | None:
+    """
+    AKShare 挂掉时的兜底：使用新浪 quotes.sina.cn 的公开 K 线接口抓取日线。
+    返回结构与当前前端期望一致：
+      { dates: [...], candle: [[open, close, low, high], ...], volume: [...], high_52w, low_52w, percentile, last_close, trade_days }
+    """
+    code6 = _parse_symbol(symbol)  # 保险：调用方可能传了带前缀
+    if not _is_a_share_6digit(code6):
+        return None
+
+    prefix = _sina_symbol_prefix(code6)  # sh600519 / sz000001
+    url = "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData"
+    def pick_arrays(container: object) -> dict | None:
+        if not isinstance(container, dict):
+            return None
+        need = ["day", "open", "high", "low", "close"]
+        if all(k in container for k in need):
+            return container
+        # 可能包在 data 里
+        if "data" in container and isinstance(container["data"], dict):
+            d = container["data"]
+            if all(k in d for k in need):
+                return d
+        return None
+
+    # 兜底：不同资料里日K的 scale 写法不完全一致，做多候选重试更稳
+    # 实测优先使用 240（返回 list 且 day 为 YYYY-MM-DD，适合直接当日线）。
+    scale_candidates = ["240", "D", "1"]
+    last_err = None
+
+    for sc in scale_candidates:
+        params = {"symbol": prefix, "scale": sc, "ma": "no", "datalen": "1023"}
+        try:
+            resp = SESSION.get(url, params=params, timeout=20)
+            text = resp.text
+        except Exception as e:
+            last_err = str(e)
+            continue
+
+        # 有些情况下返回可能带非 JSON 前缀；尽量抓取 JSON 段
+        try:
+            obj = resp.json()
+        except Exception:
+            try:
+                first = text.find("{")
+                last = text.rfind("}")
+                if first >= 0 and last > first:
+                    obj = json.loads(text[first : last + 1])
+                else:
+                    last_err = "no json object"
+                    continue
+            except Exception as e:
+                last_err = str(e)
+                continue
+
+        rows: list[dict[str, object]] = []
+
+        # 情况 1：obj 是 list（scale=240 的实测返回）
+        if isinstance(obj, list):
+            for item in obj:
+                if not isinstance(item, dict):
+                    continue
+                dstr = _parse_maybe_timestamp_to_ymd(item.get("day"))
+                if not dstr:
+                    continue
+                try:
+                    o = float(item.get("open"))
+                    c = float(item.get("close"))
+                    lo = float(item.get("low"))
+                    hi_ = float(item.get("high"))
+                    v_raw = item.get("volume")
+                    v = float(v_raw) if v_raw is not None else 0.0
+                except Exception:
+                    continue
+                rows.append({"date": dstr, "o": o, "c": c, "lo": lo, "hi": hi_, "v": v})
+
+        # 情况 2：obj 是 dict（数组式返回）
+        else:
+            arrays = pick_arrays(obj)
+            if not arrays:
+                continue
+
+            days = arrays.get("day") or []
+            opens = arrays.get("open") or []
+            highs = arrays.get("high") or []
+            lows = arrays.get("low") or []
+            closes = arrays.get("close") or []
+            vols = arrays.get("volume") or [0] * len(days)
+
+            n = min(len(days), len(opens), len(highs), len(lows), len(closes), len(vols))
+            if n <= 10:
+                continue
+
+            for i in range(n):
+                dstr = _parse_maybe_timestamp_to_ymd(days[i])
+                if not dstr:
+                    continue
+                try:
+                    o = float(opens[i])
+                    c = float(closes[i])
+                    lo = float(lows[i])
+                    hi_ = float(highs[i])
+                    v = float(vols[i])
+                except Exception:
+                    continue
+                rows.append({"date": dstr, "o": o, "c": c, "lo": lo, "hi": hi_, "v": v})
+
+        if len(rows) <= 10:
+            continue
+
+        # 统一按日期从旧到新排序
+        rows.sort(key=lambda r: r["date"])
+
+        closes_all = [float(r["c"]) for r in rows]
+        volumes_all = [float(r["v"]) for r in rows]
+        dates_all = [str(r["date"]) for r in rows]
+        candle_all = [
+            [round(float(r["o"]), 4), round(float(r["c"]), 4), round(float(r["lo"]), 4), round(float(r["hi"]), 4)]
+            for r in rows
+        ]
+
+        win = rows[-250:] if len(rows) >= 250 else rows
+        try:
+            hi = float(max(r["hi"] for r in win))
+            lo = float(min(r["lo"] for r in win))
+            last_close = float(closes_all[-1])
+            pct = round((last_close - lo) / (hi - lo) * 100, 2) if hi > lo else 50.0
+            pct = max(0.0, min(100.0, pct))
+        except Exception:
+            continue
+
+        chart_n = min(90, len(closes_all))
+        chart_closes = [round(x, 3) for x in closes_all[-chart_n:]]
+
+        return {
+            "symbol": code6,
+            "closes": chart_closes,
+            "dates": dates_all,
+            "candle": candle_all,
+            "volume": volumes_all,
+            "high_52w": round(hi, 2),
+            "low_52w": round(lo, 2),
+            "percentile": pct,
+            "last_close": round(last_close, 2),
+            "trade_days": int(len(rows)),
+            "update_time": _now_str(),
+        }
+
+    # 全部候选失败
+    _fetch_daily_bars_sina.last_err = last_err
+    return None
+
+
 @app.route("/api/stock/daily-bars", methods=["GET"])
 def stock_daily_bars():
     """A 股近一年高低点与日线收盘价序列（用于网页 K 线与分位）。"""
@@ -736,37 +1002,76 @@ def stock_daily_bars():
     end_d = datetime.now().strftime("%Y%m%d")
     # 缩短回溯区间以降低 akshare 拉取耗时（但足够覆盖尾部 ~250 个交易日）
     start_d = (datetime.now() - timedelta(days=380)).strftime("%Y%m%d")
+    # AKShare 的复权参数在不同版本/股票上容错差异较大：
+    # 先尝试前复权/不复权/后复权，尽量拿到可用数据。
+    adjust_values = ["qfq", "bfq", "hfq"]
 
     # 尽量做“多源兜底”：不同 akshare 版本 / 不同网络条件，函数可用性不同。
-    candidates: list[tuple[str, callable]] = []
-    if hasattr(ak, "stock_zh_a_hist_em"):
-        candidates.append(("stock_zh_a_hist_em", lambda: ak.stock_zh_a_hist_em(
-            symbol=symbol, period="daily", start_date=start_d, end_date=end_d, adjust="", timeout=20
-        )))
-    # stock_zh_a_hist 在你的环境里可能会 Connection aborted，因此也作为备选
-    if hasattr(ak, "stock_zh_a_hist"):
-        candidates.append(("stock_zh_a_hist", lambda: ak.stock_zh_a_hist(
-            symbol=symbol, period="daily", start_date=start_d, end_date=end_d, adjust="", timeout=20
-        )))
-    if hasattr(ak, "stock_zh_a_hist_tx"):
-        candidates.append(("stock_zh_a_hist_tx", lambda: ak.stock_zh_a_hist_tx(
-            symbol=_tx_symbol(symbol), start_date=start_d, end_date=end_d, adjust="", timeout=20
-        )))
+    for adjust in adjust_values:
+        candidates: list[tuple[str, callable]] = []
+        if hasattr(ak, "stock_zh_a_hist_em"):
+            candidates.append((
+                f"stock_zh_a_hist_em(adjust={adjust})",
+                lambda adjust=adjust: ak.stock_zh_a_hist_em(
+                    symbol=symbol,
+                    period="daily",
+                    start_date=start_d,
+                    end_date=end_d,
+                    adjust=adjust,
+                    timeout=20,
+                ),
+            ))
+        # stock_zh_a_hist 在你的环境里可能会 Connection aborted，因此也作为备选
+        if hasattr(ak, "stock_zh_a_hist"):
+            candidates.append((
+                f"stock_zh_a_hist(adjust={adjust})",
+                lambda adjust=adjust: ak.stock_zh_a_hist(
+                    symbol=symbol,
+                    period="daily",
+                    start_date=start_d,
+                    end_date=end_d,
+                    adjust=adjust,
+                    timeout=20,
+                ),
+            ))
+        if hasattr(ak, "stock_zh_a_hist_tx"):
+            candidates.append((
+                f"stock_zh_a_hist_tx(adjust={adjust})",
+                lambda adjust=adjust: ak.stock_zh_a_hist_tx(
+                    symbol=_tx_symbol(symbol),
+                    start_date=start_d,
+                    end_date=end_d,
+                    adjust=adjust,
+                    timeout=20,
+                ),
+            ))
 
-    for name, fn in candidates:
-        try:
-            df = fn()
-            if df is not None and not getattr(df, "empty", True):
-                break
-        except Exception as e:
-            fetch_err = str(e)
-            fetch_errors.append(f"{name}: {fetch_err}")
-            df = None
+        for name, fn in candidates:
+            try:
+                df = fn()
+                if df is not None and not getattr(df, "empty", True):
+                    break
+            except Exception as e:
+                fetch_err = str(e)
+                fetch_errors.append(f"{name}: {fetch_err}")
+                df = None
+
+        if df is not None and not getattr(df, "empty", True):
+            break
 
     if df is None or getattr(df, "empty", True):
+        # AKShare 失败：尝试新浪公开接口兜底
+        sina = _fetch_daily_bars_sina(symbol)
+        if sina:
+            _STOCK_DAILY_BARS_CACHE[symbol] = {"ts": now_ts, "data": sina}
+            return jsonify({"code": 200, "msg": "success(sina)", "data": sina})
+
         msg = fetch_err or "no data"
         if fetch_errors:
             msg = msg + " | " + " ; ".join(fetch_errors[:3])
+        sina_err = getattr(_fetch_daily_bars_sina, "last_err", None)
+        if sina_err:
+            msg = msg + f" | sina: {sina_err}"
         return jsonify({"code": 500, "msg": f"K线抓取失败：{msg}", "data": None})
     dc = _df_pick_col(df, "日期")
     oc = _df_pick_col(df, "开盘")
@@ -804,7 +1109,15 @@ def stock_daily_bars():
                 vc = vc or cols[6]
 
     if not dc or not oc or not cc or not hc or not lc or not vc:
-        return jsonify({"code": 500, "msg": "无法识别K线列", "data": None})
+        sina = _fetch_daily_bars_sina(symbol)
+        if sina:
+            _STOCK_DAILY_BARS_CACHE[symbol] = {"ts": now_ts, "data": sina}
+            return jsonify({"code": 200, "msg": "success(sina)", "data": sina})
+        sina_err = getattr(_fetch_daily_bars_sina, "last_err", None)
+        msg = "无法识别K线列"
+        if sina_err:
+            msg = msg + f" | sina: {sina_err}"
+        return jsonify({"code": 500, "msg": msg, "data": None})
     df = df.sort_values(dc).reset_index(drop=True)
     win = df.tail(250)
     try:
@@ -815,7 +1128,15 @@ def stock_daily_bars():
         pct = round((last_close - lo) / (hi - lo) * 100, 2) if hi > lo else 50.0
         pct = max(0.0, min(100.0, pct))
     except Exception:
-        return jsonify({"code": 500, "msg": "K线解析失败", "data": None})
+        sina = _fetch_daily_bars_sina(symbol)
+        if sina:
+            _STOCK_DAILY_BARS_CACHE[symbol] = {"ts": now_ts, "data": sina}
+            return jsonify({"code": 200, "msg": "success(sina)", "data": sina})
+        sina_err = getattr(_fetch_daily_bars_sina, "last_err", None)
+        msg = "K线解析失败"
+        if sina_err:
+            msg = msg + f" | sina: {sina_err}"
+        return jsonify({"code": 500, "msg": msg, "data": None})
     chart_n = min(90, len(closes_all))
     chart_closes = [round(x, 3) for x in closes_all[-chart_n:]]
     dates: list[str] = []
@@ -906,6 +1227,164 @@ def stock_insight():
     return jsonify({"code": 200, "msg": "success", "data": {"lines": lines, "source": "template"}})
 
 
+@app.route("/api/research/stock-llm-insight", methods=["POST", "OPTIONS"])
+def stock_llm_insight():
+    """
+    基于 LLM 生成：AI 智能研判（3-5条）+ 未持仓操作建议（3条）。
+    输入：{ symbol }，symbol 为沪深京 6 位代码（如 600519）
+    """
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    body = request.get_json(silent=True) or {}
+    raw_symbol = str(body.get("symbol") or body.get("leader") or body.get("code") or "").strip()
+    symbol = _parse_symbol(raw_symbol)
+    if not _is_a_share_6digit(symbol):
+        return jsonify({"code": 400, "msg": "仅支持沪深京 A 股 6 位代码", "data": None})
+
+    # 1) 行情（实时/近实时）
+    try:
+        quote = _fetch_a_share_quote(symbol) or {}
+    except Exception as e:
+        quote = {}
+
+    # 2) 历史（K 线）
+    daily = None
+    try:
+        daily = _fetch_daily_bars_sina(symbol)
+    except Exception:
+        daily = None
+
+    # 3) 新闻趋势（用热点与快讯做近似输入）
+    hot = []
+    try:
+        rows = _fetch_hot_node("sh_a", 30) + _fetch_hot_node("sz_a", 30)
+        # 去重并按涨幅降序
+        seen = set()
+        uniq = []
+        for x in rows:
+            k = str(x.get("leader") or "")
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            uniq.append(x)
+        uniq.sort(key=lambda x: _to_float(x.get("pct_chg"), -9999) or -9999, reverse=True)
+        hot = uniq[:8]
+    except Exception:
+        hot = []
+
+    # 如果新浪快讯获取失败也没关系，LLM 仍可基于行情+历史输出
+    global_news = []
+    try:
+        items = _fetch_news_live(page=1, num=6) or []
+        global_news = items[:5]
+    except Exception:
+        global_news = []
+
+    if not daily or not isinstance(daily, dict) or not daily.get("dates") or not daily.get("candle"):
+        return jsonify({"code": 500, "msg": "无法获取历史K线数据（已尝试新浪兜底）", "data": None})
+
+    name = quote.get("name") or symbol
+    pct_chg = float(quote.get("pct_chg") or 0.0)
+    price = quote.get("price") or daily.get("last_close") or 0.0
+
+    closes = daily.get("closes") or []
+    # 计算简单趋势特征：近 10/20（如果长度足够）
+    def _pct(a, b):
+        try:
+            a = float(a)
+            b = float(b)
+            if b == 0:
+                return 0.0
+            return (a - b) / b * 100.0
+        except Exception:
+            return 0.0
+
+    last_close = daily.get("last_close") or 0.0
+    change_10 = _pct(closes[-1], closes[-11]) if isinstance(closes, list) and len(closes) >= 12 else 0.0
+    change_20 = _pct(closes[-1], closes[-21]) if isinstance(closes, list) and len(closes) >= 22 else 0.0
+
+    hi_52w = daily.get("high_52w") or 0.0
+    lo_52w = daily.get("low_52w") or 0.0
+    percentile = float(daily.get("percentile") or 0.0)
+
+    # LLM 提示（要求输出 JSON）
+    user_msg = {
+        "symbol": symbol,
+        "name": name,
+        "quote": {
+            "price": price,
+            "pct_chg": pct_chg,
+            "high": quote.get("high"),
+            "low": quote.get("low"),
+            "open": quote.get("open"),
+        },
+        "historical": {
+            "last_close": last_close,
+            "percentile": percentile,
+            "high_52w": hi_52w,
+            "low_52w": lo_52w,
+            "change_10d_pct": round(change_10, 2),
+            "change_20d_pct": round(change_20, 2),
+            "dates_tail": daily.get("dates", [])[-6:],
+        },
+        "news_trend": {
+            "hot_topics": hot,
+            "global_news_tail": [
+                {"title": x.get("title"), "summary": x.get("summary")} for x in global_news if isinstance(x, dict)
+            ],
+        },
+        "task": {
+            "aiInsightList": "生成 3-5条简短研判：把行情/趋势/历史分位/新闻影响串起来，每条不超过60字",
+            "suggestionList": "生成 3条未持仓操作建议：包含观察要点与风控口径，每条不超过60字；不构成投资建议",
+        },
+    }
+
+    system_msg = (
+        "你是金融研究助理。输出必须是合法 JSON，且只包含 keys: aiInsightList 和 suggestionList。"
+        "每个 value 都是字符串数组。禁止输出 Markdown。"
+    )
+
+    messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": json.dumps(user_msg, ensure_ascii=False)},
+    ]
+
+    try:
+        content = _openai_compat_chat(messages, max_tokens=420, temperature=0.4)
+        obj = _extract_json_object(content) or {}
+        ai = obj.get("aiInsightList")
+        sug = obj.get("suggestionList")
+        ai_list = _safe_bullets(ai, max_items=5)
+        sug_list = _safe_bullets(sug, max_items=3)
+        if not ai_list:
+            ai_list = [
+                f"{name} 当前分位{percentile:.0f}%，短期呈现区间/动量偏向（基于近10/20日收益）。",
+                "建议结合回撤承接与量价配合，避免单一指标做决定。",
+                "如板块情绪走弱，短线波动可能放大。"
+            ]
+        if not sug_list:
+            sug_list = [
+                "未持仓建议等待回撤后的确认信号，再考虑分批试仓。",
+                "若突破关键位置但量能不跟随，降低风险暴露并设止损位。",
+                "以中短周期为前提制定计划，避免追涨后被动。"
+            ]
+        return jsonify({"code": 200, "msg": "success(llm)", "data": {"aiInsightList": ai_list, "suggestionList": sug_list}})
+    except Exception as e:
+        # LLM 不可用时退回模板（不影响页面展示）
+        lines = [
+            f"{name} 当前涨跌幅 {pct_chg:+.2f}%，结合历史分位与近10/20日动量，短期以结构性波动为主。",
+            f"当前处于近一年分位 {percentile:.0f}%，上行需看趋势延续，下行需关注回撤承接。",
+            "新闻面以热点/快讯情绪为参考，建议优先看资金与板块联动。"
+        ]
+        suggestions = [
+            "未持仓：等待关键位附近的放量/承接确认，再分批参与。",
+            "设置明确的止损/止盈规则，避免单次波动影响整体计划。",
+            "若走势与量能背离，提高观望权重并减少追涨。"
+        ]
+        return jsonify({"code": 500, "msg": f"LLM失败：{e}", "data": {"aiInsightList": lines[:5], "suggestionList": suggestions[:3]}})
+
+
 @app.route("/api/research/analyze", methods=["POST", "OPTIONS"])
 def research_analyze():
     if request.method == "OPTIONS":
@@ -923,6 +1402,103 @@ def research_analyze():
             stock = live
     except Exception:
         stock = {}
+
+    # 若 LLM 配置存在：用你的模型基于行情/历史/新闻回答；否则回退模板
+    llm_env = _get_llm_env()
+    llm_ready = bool(llm_env.get("api_base") and llm_env.get("model") and llm_env.get("api_key"))
+    if llm_ready and _is_a_share_6digit(symbol):
+        try:
+            daily = _fetch_daily_bars_sina(symbol)  # 尽量用新浪兜底，减少依赖 akshare
+            if not daily:
+                daily = {}
+            # 热点/快讯：给模型参考情绪与主题
+            hot = []
+            try:
+                rows = _fetch_hot_node("sh_a", 22) + _fetch_hot_node("sz_a", 22)
+                seen = set()
+                uniq = []
+                for x in rows:
+                    k = str(x.get("leader") or "")
+                    if not k or k in seen:
+                        continue
+                    seen.add(k)
+                    uniq.append(x)
+                uniq.sort(key=lambda x: _to_float(x.get("pct_chg"), -9999) or -9999, reverse=True)
+                hot = uniq[:6]
+            except Exception:
+                hot = []
+            global_news = []
+            try:
+                items = _fetch_news_live(page=1, num=6) or []
+                global_news = items[:4]
+            except Exception:
+                global_news = []
+
+            name = stock.get("name") or symbol
+            pct_chg = float(stock.get("pct_chg") or 0.0)
+            last_close = daily.get("last_close") or 0.0
+            closes = daily.get("closes") or []
+
+            def _pct(a, b):
+                try:
+                    a = float(a)
+                    b = float(b)
+                    if b == 0:
+                        return 0.0
+                    return (a - b) / b * 100.0
+                except Exception:
+                    return 0.0
+
+            change_10 = _pct(closes[-1], closes[-11]) if isinstance(closes, list) and len(closes) >= 12 else 0.0
+            change_20 = _pct(closes[-1], closes[-21]) if isinstance(closes, list) and len(closes) >= 22 else 0.0
+            percentile = float(daily.get("percentile") or 0.0)
+
+            user_msg = {
+                "symbol": symbol,
+                "name": name,
+                "question": q,
+                "quote": {
+                    "price": stock.get("price"),
+                    "pct_chg": pct_chg,
+                    "open": stock.get("open"),
+                    "high": stock.get("high"),
+                    "low": stock.get("low"),
+                },
+                "historical": {
+                    "last_close": last_close,
+                    "percentile": percentile,
+                    "change_10d_pct": round(change_10, 2),
+                    "change_20d_pct": round(change_20, 2),
+                },
+                "news_trend": {
+                    "hot_topics": hot,
+                    "global_news_tail": [
+                        {"title": x.get("title"), "summary": x.get("summary")} for x in global_news if isinstance(x, dict)
+                    ],
+                },
+                "output_requirements": {
+                    "must_include": ["行情简述", "趋势/历史含义", "与新闻主题的关联", "风控口径（非投资建议）"],
+                    "max_chars": 380,
+                },
+            }
+
+            system_msg = (
+                "你是金融研究助理。根据输入的行情/历史/新闻趋势回答用户问题。"
+                "必须只输出合法 JSON 对象，包含 key: summary（字符串）。禁止 Markdown。"
+            )
+            messages = [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": json.dumps(user_msg, ensure_ascii=False)},
+            ]
+            content = _openai_compat_chat(messages, max_tokens=380, temperature=0.35)
+            obj = _extract_json_object(content) or {}
+            summary = str(obj.get("summary") or "").strip()
+            if summary:
+                return jsonify({"code": 200, "msg": "success(llm)", "data": {"summary": summary, "session_id": uuid.uuid4().hex}})
+        except Exception:
+            pass
+
+    # 回退模板（LLM 不可用/配置缺失/解析失败）
     summary = (
         f"基于当前样本，{stock.get('name', symbol or '该标的')}短期以结构性波动为主。"
         "建议优先关注回撤承接与板块强度变化，控制追涨节奏。"

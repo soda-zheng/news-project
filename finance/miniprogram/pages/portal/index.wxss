@@ -897,11 +897,13 @@ page {
 }
 
 .stock-change-percent.positive {
-  color: #10b981;
+  /* 红=涨 */
+  color: #ef4444;
 }
 
 .stock-change-percent.negative {
-  color: #ef4444;
+  /* 绿=跌 */
+  color: #22c55e;
 }
 
 .stock-detail {
@@ -968,8 +970,8 @@ page {
 .kline-container {
   background: #fff;
   border-radius: 48rpx;
-  padding: 32rpx;
-  margin-bottom: 32rpx;
+  padding: 40rpx;
+  margin-bottom: 40rpx;
 }
 
 .kline-header {
@@ -997,34 +999,161 @@ page {
 .kline-canvas-wrap {
   background: #fafafa;
   border-radius: 24rpx;
-  padding: 24rpx;
+  padding: 0;
   margin-bottom: 24rpx;
-  min-height: 500rpx;
+  /* 与 ec-canvas 高度保持一致，避免 chart 偏移/溢出 */
+  height: 520rpx;
   position: relative;
   box-sizing: border-box;
+  /* 防止 canvas 尺寸测量异常时溢出覆盖到下面的历史位置卡片 */
+  overflow: hidden;
 }
 
 .kline-ec-host {
   width: 100%;
-  height: 480rpx;
+  height: 520rpx;
+  overflow: hidden;
+  position: relative;
+  cursor: default;
 }
 
-.kline-ec-host ec-canvas {
-  display: block;
+.kline-simple-canvas {
   width: 100%;
   height: 100%;
+  display: block;
 }
 
 .kline-placeholder {
-  min-height: 420rpx;
+  height: 520rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 32rpx;
+  padding: 0 24rpx;
   font-size: 24rpx;
   color: #94a3b8;
   box-sizing: border-box;
+  white-space: normal;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.kline-dom-price {
+  height: 84%;
+  width: 100%;
+  overflow: hidden;
+  padding-left: 84rpx;
+  box-sizing: border-box;
+}
+
+.kline-dom-grid {
+  position: absolute;
+  left: 84rpx;
+  right: 0;
+  top: 0;
+  /* 只绘制价格区域的网格，不覆盖到底部日期区 */
+  bottom: 90rpx;
+  pointer-events: none;
+}
+
+.kline-dom-grid-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1rpx dashed #eef2f7;
+}
+
+.kline-dom-volume {
+  height: 0;
+  display: none;
+  width: 100%;
+  overflow: hidden;
+  padding-left: 84rpx;
+  box-sizing: border-box;
+}
+
+.kline-dom-axis {
+  position: absolute;
+  left: 0;
+  top: 10rpx;
+  /* 底部日期区大约占 16%（当前容器约 520rpx => 80rpx 左右），避免价格刻度和日期重叠 */
+  bottom: 90rpx;
+  width: 84rpx;
+  pointer-events: none;
+}
+
+.kline-dom-axis-item {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  font-size: 20rpx;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.kline-dom-dates-row {
+  height: 16%;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  /* 给日期留出和蜡烛一致的左侧空间，避免和价格刻度重叠 */
+  padding: 0 20rpx 0 84rpx;
+  box-sizing: border-box;
+  font-size: 20rpx;
+  color: #64748b;
+}
+
+.kline-dom-date {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  flex: 0 0 auto;
+}
+
+.kline-dom-row {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.kline-dom-price-row {
+  align-items: stretch;
+}
+
+.kline-dom-candle {
+  position: relative;
+  flex-shrink: 0;
+  height: 100%;
+}
+
+.kline-dom-wick {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  /* 宽度/圆角由内联 style 跟随缩放 */
+  width: 10%;
+  border-radius: 999rpx;
+}
+
+.kline-dom-body {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  /* 宽度/圆角由内联 style 跟随缩放 */
+  width: 60%;
+  border-radius: 999rpx;
+}
+
+.kline-dom-volume-row {
+  align-items: flex-end;
+}
+
+.kline-dom-volbar {
+  flex-shrink: 0;
+  border-radius: 2rpx 2rpx 0 0;
 }
 
 .kline-tip {

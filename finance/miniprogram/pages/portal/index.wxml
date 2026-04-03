@@ -190,15 +190,61 @@
       </view>
       <view class="kline-canvas-wrap">
         <view wx:if="{{!klineShowEcharts}}" class="kline-placeholder">{{klinePlaceholderText}}</view>
-        <view wx:if="{{klineShowEcharts}}" class="kline-ec-host">
-          <ec-canvas
-            id="stock-kline-ec"
-            canvas-id="stock-kline-canvas"
-            ec="{{ecKline}}"
-          ></ec-canvas>
+        <view
+          wx:if="{{klineShowEcharts}}"
+          class="kline-ec-host"
+          bindtouchstart="onKlineTouchStart"
+          bindtouchmove="onKlineTouchMove"
+        >
+          <!-- 自绘 K 线（DOM 方式）：不依赖 canvas/eCharts，彻底杜绝“跟着鼠标走/两层溢出” -->
+          <view class="kline-dom-grid">
+            <view
+              wx:for="{{klineDomPriceMarks}}"
+              wx:key="topPct"
+              class="kline-dom-grid-line"
+              style="top: {{item.topPct}}%;"
+            ></view>
+          </view>
+          <view wx:if="{{klineDomPriceMarks && klineDomPriceMarks.length}}" class="kline-dom-axis">
+            <view
+              wx:for="{{klineDomPriceMarks}}"
+              wx:key="*this"
+              class="kline-dom-axis-item"
+              style="top: {{item.topPct}}%;"
+            >
+              {{item.text}}
+            </view>
+          </view>
+          <view class="kline-dom-price">
+            <view class="kline-dom-row kline-dom-price-row">
+              <view
+                wx:for="{{klineDomCandles}}"
+                wx:key="idx"
+                class="kline-dom-candle"
+                style="width: {{klineDomCandleWidthPct}}%;"
+              >
+                <view
+                  class="kline-dom-wick"
+                  style="width: {{item.wickWidthPct}}%; top: {{item.wickTopPct}}%; height: {{item.wickHeightPct}}%; background-color: {{item.color}};"
+                ></view>
+                <view
+                  class="kline-dom-body"
+                  style="width: {{item.bodyWidthPct}}%; top: {{item.bodyTopPct}}%; height: {{item.bodyHeightPct}}%; background-color: {{item.color}};"
+                ></view>
+              </view>
+            </view>
+          </view>
+
+          <view wx:if="{{klineDomDateLabels && klineDomDateLabels.length}}" class="kline-dom-dates-row">
+            <view
+              wx:for="{{klineDomDateLabels}}"
+              wx:key="*this"
+              class="kline-dom-date"
+            >{{item}}</view>
+          </view>
         </view>
       </view>
-      <view class="kline-tip">双指捏合缩放，单指左右拖动查看历史区间；红涨绿跌，下方为成交量（后端日线）</view>
+      <view class="kline-tip">红=收盘高于开盘，绿=收盘低于开盘；蜡烛长短表示涨跌强弱，影线表示最高/最低；拖动放大/缩小看更近或更远</view>
     </view>
     <view class="history-card">
       <view class="history-title">📊 历史位置</view>

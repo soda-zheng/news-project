@@ -1,4 +1,4 @@
-const { stockData, watchList } = require('../../utils/data')
+const { watchList } = require('../../utils/data')
 const { normalizeCode, setSelectedCode } = require('../../utils/state')
 
 const STORAGE_KEY = 'watchlistCodes'
@@ -8,16 +8,12 @@ function getDefaultCodes() {
 }
 
 function buildList(codes) {
-  return (codes || []).map((code) => {
-    const x = watchList.find((w) => w.code === code) || { code, tip: '已添加自选' }
-    const s = stockData[x.code] || {}
-    return {
-      code: x.code,
-      name: s.name || x.code,
-      price: s.price || '—',
-      tip: x.tip
-    }
-  })
+  return (codes || []).map((code) => ({
+    code,
+    name: code,
+    price: '¥--',
+    tip: '自选'
+  }))
 }
 
 Page({

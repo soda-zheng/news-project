@@ -65,8 +65,12 @@ function postStockInsight(payload) {
   return requestJson({ url: '/api/topics/stock-insight', method: 'POST', data: payload || {} })
 }
 
+function postStockLLMInsight(payload) {
+  return requestJson({ url: '/api/research/stock-llm-insight', method: 'POST', data: payload || {}, timeout: 30000 })
+}
+
 function postResearchAnalyze(payload) {
-  return requestJson({ url: '/api/research/analyze', method: 'POST', data: payload || {} })
+  return requestJson({ url: '/api/research/analyze', method: 'POST', data: payload || {}, timeout: 30000 })
 }
 
 function uploadPdf(filePath, name = 'report.pdf') {
@@ -114,6 +118,7 @@ module.exports = {
   getMarketAOverview,
   getStockDailyBars,
   postStockInsight,
+  postStockLLMInsight,
   postResearchAnalyze,
   uploadPdf,
   startAnalyze,

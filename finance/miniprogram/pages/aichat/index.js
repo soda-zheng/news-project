@@ -1,25 +1,24 @@
-const { stockData } = require('../../utils/data')
+const { stockShell } = require('../../utils/data')
 const { getCodeByKeyword } = require('../../utils/helpers')
 const { getQuote, postStockInsight, getHotTopics } = require('../../utils/api')
 const { getSelectedCode, setSelectedCode, normalizeCode } = require('../../utils/state')
 
 function pickStock(code) {
-  const c = String(code || '').trim()
-  return stockData[c] || stockData['300750']
+  return stockShell(code)
 }
 
 Page({
   data: {
     keyword: '',
-    currentCode: '300750',
-    current: pickStock('300750'),
+    currentCode: '',
+    current: pickStock(''),
     loading: false
   },
   onLoad(query) {
     const qCode = query && query.code ? String(query.code) : ''
     const code = normalizeCode(qCode) || getSelectedCode()
     this.applyCode(code)
-    this.refreshCurrentAnalysis(code)
+    if (code) this.refreshCurrentAnalysis(code)
   },
   onKeywordInput(e) {
     this.setData({ keyword: e.detail.value })
@@ -28,6 +27,10 @@ Page({
     const input = String(this.data.keyword || '').trim()
     if (!input) return
     const code = normalizeCode(getCodeByKeyword(input) || input)
+    if (!code) {
+      wx.showToast({ title: '请输入有效 A 股代码', icon: 'none' })
+      return
+    }
     this.applyCode(code)
     await this.refreshCurrentAnalysis(code)
   },
@@ -44,6 +47,7 @@ Page({
   },
   async refreshCurrentAnalysis(code) {
     const c = normalizeCode(code) || this.data.currentCode
+    if (!c) return
     const fallback = pickStock(c)
     this.setData({ loading: true })
     try {
@@ -71,15 +75,15 @@ Page({
       }
       this.setData({ current: merged })
     } catch (e) {
-      wx.showToast({ title: '接口异常，已展示本地数据', icon: 'none' })
+      wx.showToast({ title: '接口异常', icon: 'none' })
       this.setData({ current: fallback })
     } finally {
       this.setData({ loading: false })
     }
   },
   applyCode(code) {
-    const c = normalizeCode(code) || '300750'
-    setSelectedCode(c)
+    const c = normalizeCode(code) || ''
+    if (c) setSelectedCode(c)
     this.setData({
       currentCode: c,
       current: pickStock(c),
