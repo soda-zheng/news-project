@@ -23,6 +23,7 @@
         wx:for="{{homeNewsList}}"
         wx:key="id"
         data-newsid="{{item.id}}"
+        data-url="{{item.url}}"
         bindtap="onNewsTap"
       >
         <view class="news-title">{{item.title}}</view>
@@ -36,7 +37,7 @@
         </view>
         <view class="news-narrative-bar">
           <view class="narrative-label">
-            <text>叙事关注度（示意）</text>
+            <text>叙事关注度</text>
             <text>{{item.narrativePercent}}%</text>
           </view>
           <view class="narrative-track">
@@ -70,11 +71,6 @@
         </view>
       </view>
 
-      <view class="risk-card" wx:if="{{topicDetail.riskIfWrong}}">
-        <view class="risk-title">⚠️ 若相反会怎样（可证伪点）</view>
-        <view class="risk-text">{{topicDetail.riskIfWrong}}</view>
-      </view>
-
       <view class="drive-card">
         <view class="section-label">📌 驱动事件</view>
         <view class="drive-text">{{topicDetail.drive}}</view>
@@ -104,8 +100,8 @@
           <text class="stock-change {{item.positive ? '' : 'negative'}}">{{item.change}}</text>
         </view>
       </view>
-      <view class="news-original">
-        <view class="news-original-title">📰 新闻原文</view>
+      <view class="news-original" bindtap="onOpenStockNews" data-url="{{topicDetail.url}}">
+        <view class="news-original-title">📰 新闻原文 <text class="news-original-link">点击查看 ></text></view>
         <view class="news-original-content">{{topicDetail.originalNews}}</view>
       </view>
 
@@ -130,8 +126,8 @@
   <view class="page {{activePage === 'stock' ? 'active-page' : ''}}">
     <view class="section-title">📈 个股分析</view>
     <view class="search-box">
-      <input class="search-input" value="{{stockSearchInput}}" placeholder="代码或名称，如 600519、黄金" confirm-type="search" bindinput="onStockSearchInput" bindconfirm="onSearchStock" />
-      <view class="search-btn" bindtap="onSearchStock">分析</view>
+      <view class="search-input" bindtap="openStockPicker">{{stockSearchInput || '代码或名称，如 600519、宁德时代'}}</view>
+      <view class="search-btn" bindtap="openStockPicker">选股</view>
     </view>
     <view class="stock-suggest-wrap" wx:if="{{stockSuggestLoading || stockSuggestList.length}}">
       <view wx:if="{{stockSuggestLoading}}" class="stock-suggest-status">正在匹配全市场 A 股…</view>
@@ -187,6 +183,7 @@
         <view class="stock-quick-btn" data-q="若继续偏弱，未持仓者如何控风险与等信号？" bindtap="onStockQuickAsk">偏弱风险控法</view>
       </view>
     </view>
+
     <view class="kline-container">
       <view class="kline-header">
         <text class="kline-title">📈 K线走势图</text>
@@ -200,7 +197,7 @@
           bindtouchstart="onKlineTouchStart"
           bindtouchmove="onKlineTouchMove"
         >
-          <!-- 自绘 K 线（DOM 方式）：不依赖 canvas/eCharts，彻底杜绝“跟着鼠标走/两层溢出” -->
+          <!-- 自绘 K 线（DOM 方式）：不依赖 canvas/eCharts，彻底杜绝"跟着鼠标走/两层溢出" -->
           <view class="kline-dom-grid">
             <view
               wx:for="{{klineDomPriceMarks}}"
@@ -280,6 +277,21 @@
       <view class="suggestion-title">📌 未持仓 · 操作建议</view>
       <view class="insight-li" wx:for="{{suggestionList}}" wx:key="*this">• {{item}}</view>
       <view class="disclaimer">AI研判仅供参考，不构成投资建议</view>
+    </view>
+
+    <!-- 📰 个股相关新闻 - 放在页面最底部 -->
+    <view class="card stock-news-card" wx:if="{{stockNewsList && stockNewsList.length}}">
+      <view class="section-title">📰 相关新闻</view>
+      <view class="stock-news-list">
+        <view class="stock-news-item" wx:for="{{stockNewsList}}" wx:key="title" bindtap="onOpenStockNews" data-url="{{item.url}}" data-title="{{item.title}}">
+          <view class="stock-news-title">{{item.title}}</view>
+          <view class="stock-news-meta">
+            <text class="stock-news-source">{{item.source}}</text>
+            <text class="stock-news-time" wx:if="{{item.ctimeStr}}">{{item.ctimeStr}}</text>
+          </view>
+          <view class="stock-news-link">点击查看原文 ></view>
+        </view>
+      </view>
     </view>
   </view>
 
@@ -398,7 +410,7 @@
         <view class="check-row"><text class="check-ok">✓</text><text>营收与净利润增速同向（示例：营收 +15.8%，净利 +22.3%）</text></view>
         <view class="check-row"><text class="check-ok">✓</text><text>毛利率 34.2%，需结合同比/环比与同业区间核对</text></view>
         <view class="check-row"><text class="check-pending">○</text><text>经营现金流与净利润匹配度（待对接解析后自动勾稽）</text></view>
-        <view class="check-row"><text class="check-pending">○</text><text>应收与存货周转是否异常（待对接解析）</text></view>
+        <view class="check-row"><text class="check-pending">○</text><text>应收与存货周转是否异常（待对接解析后自动勾稽）</text></view>
         <view class="check-row"><text class="check-ok">✓</text><text>非经常性损益占比已粗览（示例：综合评级「增持」为演示输出）</text></view>
       </view>
       <view class="earnings-faq-block">

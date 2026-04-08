@@ -984,7 +984,59 @@ page {
   color: #0f2f73;
 }
 
-.kline-container {
+/* 📰 个股新闻 */
+.stock-news-card {
+  background: #fff;
+  border-radius: 32rpx;
+  padding: 32rpx;
+  margin-bottom: 32rpx;
+}
+
+.stock-news-list {
+  margin-top: 16rpx;
+}
+
+.stock-news-item {
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid #f0f4fa;
+}
+
+.stock-news-item:last-child {
+  border-bottom: none;
+}
+
+.stock-news-title {
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #1a1a1a;
+  line-height: 1.5;
+  margin-bottom: 12rpx;
+}
+
+.stock-news-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12rpx;
+}
+
+.stock-news-source {
+  font-size: 24rpx;
+  color: #999;
+}
+
+.stock-news-time {
+  font-size: 24rpx;
+  color: #999;
+}
+
+.stock-news-link {
+  font-size: 24rpx;
+  color: #0f2f73;
+  text-decoration: none;
+}
+
+.stock-quick-row {
   background: #fff;
   border-radius: 48rpx;
   padding: 40rpx;
@@ -1194,17 +1246,17 @@ page {
 }
 
 .history-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 24rpx;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20rpx;
 }
 
 .history-item {
-  width: calc(50% - 12rpx);
   background: #f8fafe;
   border-radius: 32rpx;
   padding: 20rpx;
   box-sizing: border-box;
+  min-width: 0;
 }
 
 .history-label {

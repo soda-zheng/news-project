@@ -4,7 +4,9 @@ const {
   searchStocks,
   getStockDailyBars,
   postStockLLMInsight,
-  postResearchAnalyze
+  postResearchAnalyze,
+  getHomeNewsEnhanced,
+  postNewsAiAnalyze
 } = require('../../utils/api')
 const { getCodeByKeyword } = require('../../utils/helpers')
 
@@ -227,6 +229,19 @@ const CHAT_QUICK_CHIPS = [
   { label: '与大盘联动', q: '若大盘指数下周急跌，该股历史上通常如何反应？' }
 ]
 
+function toChatChipsFromFollowUps(items) {
+  const arr = Array.isArray(items) ? items : []
+  const out = []
+  for (let i = 0; i < arr.length; i++) {
+    const q = String(arr[i] || '').trim()
+    if (!q) continue
+    const label = q.length > 12 ? `${q.slice(0, 12)}…` : q
+    out.push({ label, q })
+    if (out.length >= 3) break
+  }
+  return out
+}
+
 const WATCHLIST_STORAGE_KEY = 'portal_watchlist_codes'
 /** 上次在个股页选中的 A 股代码（仅本机） */
 const PORTAL_LAST_STOCK_KEY = 'portal_last_stock_code'
@@ -246,6 +261,21 @@ function formatTopicNoteTime(ts) {
   const d = new Date(ts)
   const pad = (n) => (n < 10 ? '0' + n : '' + n)
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function formatCtime(ctime) {
+  if (!ctime || ctime <= 0) return ''
+  const d = new Date(ctime * 1000)
+  const now = new Date()
+  const diff = now - d
+  const mins = Math.floor(diff / 60000)
+  const hours = Math.floor(diff / 3600000)
+  const days = Math.floor(diff / 86400000)
+  if (mins < 60) return `${mins}分钟前`
+  if (hours < 24) return `${hours}小时前`
+  if (days < 7) return `${days}天前`
+  const pad = (n) => (n < 10 ? '0' + n : '' + n)
+  return `${d.getMonth() + 1}/${pad(d.getDate())}`
 }
 
 function isAshare6digit(code) {
@@ -505,6 +535,7 @@ Page({
     stockQuickQuestions: DEFAULT_STOCK_QUICK_QUESTIONS.slice(),
     aiInsightList: [],
     suggestionList: [],
+    stockNewsList: [],
     ecKline: { lazyLoad: true },
     klineShowEcharts: false,
     klinePlaceholderText: '加载K线…',
@@ -521,7 +552,7 @@ Page({
     chatMessages: [
       {
         role: 'ai',
-        text: '您好！我是财懂了AI助手。请先在「个股分析」搜索并选择沪深京 A 股；我会结合后端行情、K 线与新闻趋势，通过大模型回答。'
+        text: '您好！我是财懂了AI助手。你可以直接提问做“通用全面分析”；若先在「个股分析」选择一只 A 股，我也能给更聚焦的个股解读。'
       }
     ],
     chatQuickChips: CHAT_QUICK_CHIPS,
@@ -534,7 +565,9 @@ Page({
     watchlistAddVisible: false,
     watchlistAddInput: '',
     watchlistHeaderMarginTopPx: 0,
-    homeNewsList: buildHomeNewsList(),
+    homeNewsList: [],
+    _newsAnalysisCache: {},
+    _homeNewsLoading: false,
     stockSuggestList: [],
     stockSuggestLoading: false,
     currentTopicId: '',
@@ -642,6 +675,7 @@ Page({
       this.refreshLiveQuote(last)
     }
     this._loadWatchlist()
+    this._loadHomeNewsEnhanced()
   },
 
   onShow() {
@@ -708,14 +742,114 @@ Page({
     if (page) this.switchPage(page)
   },
 
+  _loadHomeNewsEnhanced() {
+    this.setData({ _homeNewsLoading: true })
+    getHomeNewsEnhanced(6)
+      .then((res) => {
+        console.log('📰 首页新闻 API 响应:', res)
+        if (res.code === 200 && res.data && Array.isArray(res.data.items)) {
+          const items = res.data.items.map((item, idx) => {
+            // 原文直链由后端尽量提供；前端不再把“搜索页”伪装成原文
+            const url = item.url || ''
+            return {
+              id: item.id || `news_${idx}`,
+              title: item.title || '',
+              summary: item.summary || '',
+              metaTime: item.metaTime || '',
+              metaSource: item.metaSource || '',
+              chips: item.chips || [],
+              heatPercentile: item.heatPercentile || 60,
+              narrativePercent: item.narrativePercent || 60,
+              url: url,
+              _raw: item._analysis || null,
+            }
+          })
+          console.log('✅ 处理后的新闻列表:', items.length, '条')
+          this.setData({ homeNewsList: items, _homeNewsLoading: false })
+          items.forEach((item) => {
+            if (item._raw && item.id) {
+              this.data._newsAnalysisCache[item.id] = item._raw
+            }
+          })
+        } else {
+          console.error('❌ 首页新闻 API 返回格式异常:', res)
+          this.setData({ _homeNewsLoading: false })
+        }
+      })
+      .catch((err) => {
+        console.error('❌ 首页新闻 API 请求失败:', err)
+        this.setData({ _homeNewsLoading: false })
+      })
+  },
+
   onNewsTap(e) {
     const id = e.currentTarget.dataset.newsid
-    const topic = topicDataMap[id]
-    if (!topic) return
+    console.log('📰 点击新闻:', id)
+    if (!id) return
+
+    const cached = this.data._newsAnalysisCache[id]
+    console.log('📰 缓存分析结果:', cached)
+    if (cached) {
+      console.log('📰 使用缓存分析结果')
+      this._showTopicDetail(id, cached)
+      return
+    }
+
+    const newsItem = (this.data.homeNewsList || []).find((n) => n.id === id)
+    console.log('📰 新闻项:', newsItem)
+    if (!newsItem) return
+
+    wx.showLoading({ title: 'AI分析中...', mask: true })
+
+    console.log('📰 调用AI分析')
+    postNewsAiAnalyze({
+      title: newsItem.title,
+      summary: newsItem.summary.replace(/🤖 AI摘要[：:]\s*/, ''),
+      url: newsItem._raw ? (newsItem._raw.url || '') : newsItem.url || '',
+      source: newsItem._raw ? (newsItem._raw.source || '') : newsItem.metaSource.replace('来源：', ''),
+      publishTime: newsItem.metaTime || '',
+      ctime: newsItem._raw ? (newsItem._raw.ctime || 0) : 0,
+    })
+      .then((res) => {
+        console.log('📰 AI分析响应:', res)
+        wx.hideLoading()
+        if (res.code === 200 && res.data) {
+          console.log('📰 AI分析成功，显示详情')
+          this.data._newsAnalysisCache[id] = res.data
+          this._showTopicDetail(id, res.data)
+
+          const updatedList = (this.data.homeNewsList || []).map((n) => {
+            if (n.id !== id) return n
+            const d = res.data
+            return {
+              ...n,
+              chips: d.chips || n.chips,
+              heatPercentile: d.heat_percentile || n.heatPercentile,
+              narrativePercent: d.narrativePercent || n.narrativePercent,
+              summary: d.ai_summary || n.summary,
+              _raw: d,
+            }
+          })
+          this.setData({ homeNewsList: updatedList })
+        } else {
+          console.log('📰 AI分析失败:', res)
+          wx.showToast({ title: '分析失败，请重试', icon: 'none' })
+        }
+      })
+      .catch((err) => {
+        console.log('📰 AI分析网络错误:', err)
+        wx.hideLoading()
+        wx.showToast({ title: '网络错误', icon: 'none' })
+      })
+  },
+
+  _showTopicDetail(id, detail) {
     const notes = readTopicNotes()
     const n = notes[id]
+    // 原文直链：不再用“搜索页”兜底冒充原文
+    const url = (detail && detail.url) ? detail.url : ''
     this.setData({
-      topicDetail: { ...topic, topicId: id },
+      topicDetail: { ...detail, topicId: id, url: url },
       currentTopicId: id,
       topicNoteBody: (n && n.noteText) || '',
       topicNoteSaved: n && n.savedAt ? formatTopicNoteTime(n.savedAt) : '',
@@ -840,6 +974,21 @@ Page({
     this.setData({ chatInput: String(q0), chatInputFocus: true })
   },
 
+  onOpenStockNews(e) {
+    const url = e.currentTarget.dataset.url
+    if (!url) {
+      wx.showToast({ title: '该条暂无原文链接', icon: 'none' })
+      return
+    }
+    const u = String(url)
+    if (/search\.sina\.com\.cn\/\?q=/.test(u) || /so\.eastmoney\.com\/news\/s\?/.test(u)) {
+      wx.showToast({ title: '当前为搜索页，可能不是原文', icon: 'none', duration: 1800 })
+    }
+    wx.navigateTo({
+      url: `/pages/webview/index?url=${encodeURIComponent(url)}`
+    })
+  },
+
   onChatChipTap(e) {
     const q = e.currentTarget.dataset.q
     if (!q) return
@@ -851,26 +1000,38 @@ Page({
     if (!text) return
     const cur = this.data.currentStock
     const code = cur && String(cur.code || '').trim()
-    if (!isAshare6digit(code)) {
-      wx.showToast({ title: '请先在个股页选择 A 股', icon: 'none' })
-      return
-    }
     const msgs = this.data.chatMessages.concat([{ role: 'user', text }])
     this.setData({
       chatMessages: msgs,
       chatInput: '',
       chatScrollToId: `msg-${msgs.length - 1}`
     })
-    postResearchAnalyze({ symbol: code, question: text })
+    const payload = { question: text }
+    if (isAshare6digit(code)) payload.symbol = code
+    payload.chatHistory = msgs.slice(-8).map((m) => ({
+      role: m.role === 'ai' ? 'assistant' : m.role,
+      text: String(m.text || '')
+    }))
+    postResearchAnalyze(payload)
       .then((res) => {
         const summary = res && res.code === 200 && res.data ? res.data.summary : ''
+        const followUps = res && res.code === 200 && res.data ? res.data.followUps : []
         const reply = summary || '暂无法生成回答，请检查后端与 LLM 配置。'
         const nextMsgs = msgs.concat([{ role: 'ai', text: reply }])
-        this.setData({ chatMessages: nextMsgs, chatScrollToId: `msg-${nextMsgs.length - 1}` })
+        const chips = toChatChipsFromFollowUps(followUps)
+        this.setData({
+          chatMessages: nextMsgs,
+          chatScrollToId: `msg-${nextMsgs.length - 1}`,
+          chatQuickChips: chips.length ? chips : CHAT_QUICK_CHIPS
+        })
       })
       .catch(() => {
         const nextMsgs = msgs.concat([{ role: 'ai', text: '请求失败，请检查网络与后端。' }])
-        this.setData({ chatMessages: nextMsgs, chatScrollToId: `msg-${nextMsgs.length - 1}` })
+        this.setData({
+          chatMessages: nextMsgs,
+          chatScrollToId: `msg-${nextMsgs.length - 1}`,
+          chatQuickChips: CHAT_QUICK_CHIPS
+        })
       })
   },
 
@@ -878,6 +1039,20 @@ Page({
     const v = e.detail.value
     this.setData({ stockSearchInput: v })
     this._scheduleStockSuggest(v)
+  },
+
+  openStockPicker() {
+    const q = String(this.data.stockSearchInput || '').trim()
+    wx.navigateTo({
+      url: `/pages/stock-picker/index?q=${encodeURIComponent(q)}`,
+      events: {
+        pickStock: (payload) => {
+          const code = String(payload && payload.code ? payload.code : '').trim()
+          if (!code) return
+          this._commitStockKey(code)
+        }
+      }
+    })
   },
 
   _scheduleStockSuggest(raw) {
@@ -1570,11 +1745,25 @@ Page({
           let aiInsightList = payload && Array.isArray(payload.aiInsightList) ? payload.aiInsightList : []
           let suggestionList = payload && Array.isArray(payload.suggestionList) ? payload.suggestionList : []
           let quickQuestionList = payload && Array.isArray(payload.quickQuestionList) ? payload.quickQuestionList : []
+          let stockNewsList = payload && Array.isArray(payload.stockNews) ? payload.stockNews : []
           const meta = payload && payload.meta && typeof payload.meta === 'object' ? payload.meta : {}
           const pdef =
             meta.percentileDefinition != null && String(meta.percentileDefinition).trim()
               ? String(meta.percentileDefinition).slice(0, 360)
               : DEFAULT_PERCENTILE_HINT
+          
+          // 格式化新闻时间并确保每个新闻都有url
+          const formattedNews = stockNewsList.map((n) => {
+            const ctime = n.ctime || 0
+            const ctimeStr = ctime > 0 ? formatCtime(ctime) : ''
+            // 个股新闻原文链接尽量由后端提供；前端不再造搜索页假装原文
+            const url = n.url || ''
+            return { ...n, ctime: Number(ctime) || 0, ctimeStr, url }
+          }).sort((a, b) => {
+            // 相关新闻按发布时间倒序：最新在前
+            return (b.ctime || 0) - (a.ctime || 0)
+          })
+          
           // 后端在 LLM 失败时可能仍返回 code=500 但附带模板化 aiInsightList/suggestionList，前端应展示
           if (aiInsightList.length || suggestionList.length) {
             this.setData({
@@ -1582,7 +1771,8 @@ Page({
               suggestionList,
               percentileDefHint: pdef,
               stockQuickQuestions:
-                quickQuestionList.length > 0 ? quickQuestionList : this.data.stockQuickQuestions
+                quickQuestionList.length > 0 ? quickQuestionList : this.data.stockQuickQuestions,
+              stockNewsList: formattedNews
             })
             return
           }
@@ -1592,7 +1782,8 @@ Page({
             suggestionList: ['—'],
             stockQuickQuestions:
               quickQuestionList.length > 0 ? quickQuestionList : this.data.stockQuickQuestions,
-            percentileDefHint: pdef
+            percentileDefHint: pdef,
+            stockNewsList: formattedNews
           })
         })
         .catch(() => {

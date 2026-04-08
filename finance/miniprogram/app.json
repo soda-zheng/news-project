@@ -8,6 +8,7 @@
     "pages/report/index",
     "pages/watchlist/index",
     "pages/mine/index",
+    "pages/stock-picker/index",
     "pages/webview/index"
   ],
   "window": {

@@ -27,8 +27,11 @@ function requestJson({ url, method = 'GET', data, timeout = 12000 }) {
   })
 }
 
-function getHotTopics(limit = 10) {
-  return requestJson({ url: `/api/topics/hot?limit=${encodeURIComponent(String(limit || 10))}` })
+function getHotTopics(limit = 10, source = 'auto', strict = false) {
+  return requestJson({
+    url: `/api/topics/hot?limit=${encodeURIComponent(String(limit || 10))}&source=${encodeURIComponent(String(source || 'auto'))}&strict=${strict ? '1' : '0'}`,
+    timeout: 150000
+  })
 }
 
 function getHomeNews(page = 1, num = 6) {
@@ -66,11 +69,11 @@ function postStockInsight(payload) {
 }
 
 function postStockLLMInsight(payload) {
-  return requestJson({ url: '/api/research/stock-llm-insight', method: 'POST', data: payload || {}, timeout: 30000 })
+  return requestJson({ url: '/api/research/stock-llm-insight', method: 'POST', data: payload || {}, timeout: 90000 })
 }
 
 function postResearchAnalyze(payload) {
-  return requestJson({ url: '/api/research/analyze', method: 'POST', data: payload || {}, timeout: 30000 })
+  return requestJson({ url: '/api/research/analyze', method: 'POST', data: payload || {}, timeout: 90000 })
 }
 
 function uploadPdf(filePath, name = 'report.pdf') {
@@ -106,6 +109,38 @@ function getTask(taskId) {
   return requestJson({ url: `/api/tasks/${encodeURIComponent(String(taskId || ''))}` })
 }
 
+function getBaiduStockRssNews(limit = 20) {
+  return requestJson({ url: `/api/news/baidu-rss?limit=${encodeURIComponent(String(limit || 20))}` })
+}
+
+function getAggregateNews(limit = 30, category = '') {
+  let url = `/api/news/aggregate?limit=${encodeURIComponent(String(limit || 30))}`
+  if (category) url += `&category=${encodeURIComponent(String(category))}`
+  return requestJson({ url })
+}
+
+function getStockNews(symbol, limit = 10) {
+  return requestJson({
+    url: `/api/news/stock?symbol=${encodeURIComponent(String(symbol || ''))}&limit=${encodeURIComponent(String(limit || 10))}`
+  })
+}
+
+function getHomeNewsEnhanced(limit = 6) {
+  return requestJson({ 
+    url: `/api/news/home-enhanced?limit=${encodeURIComponent(String(limit || 6))}`,
+    timeout: 300000
+  })
+}
+
+function postNewsAiAnalyze(payload) {
+  return requestJson({
+    url: '/api/news/ai-analyze',
+    method: 'POST',
+    data: payload || {},
+    timeout: 300000
+  })
+}
+
 module.exports = {
   get API_BASE() {
     return getApiBase()
@@ -122,5 +157,10 @@ module.exports = {
   postResearchAnalyze,
   uploadPdf,
   startAnalyze,
-  getTask
+  getTask,
+  getBaiduStockRssNews,
+  getAggregateNews,
+  getStockNews,
+  getHomeNewsEnhanced,
+  postNewsAiAnalyze
 }

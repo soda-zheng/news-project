@@ -1,0 +1,1267 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>财懂了 - 离线预览（与小程序页面对齐）</title>
+    <style>
+      /* 目标：与 finance/miniprogram/pages/portal/index.wxml + index.wxss 结构/文案一致（离线 mock 数据） */
+      :root {
+        --bg: #f5f7fb;
+        --blue: #0f2f73;
+        --blue2: #1e4a8a;
+        --muted: #8e9aaf;
+        --text: #0f172a;
+        --line: rgba(0, 0, 0, 0.05);
+        --cardLine: rgba(0, 0, 0, 0.03);
+        --red: #ef4444;
+        --green: #22c55e;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "PingFang SC", "Microsoft YaHei",
+          "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      /* 近似 rpx：按 375px 视口折算（只为离线预览观感接近） */
+      .app-container {
+        max-width: 375px;
+        margin: 0 auto;
+        background: var(--bg);
+        min-height: 100vh;
+        position: relative;
+        padding: 16px 16px 86px;
+      }
+      .page {
+        display: none;
+        padding: 16px;
+        animation: fadeIn 0.25s ease;
+      }
+      .page.active-page {
+        display: block;
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .card {
+        background: #fff;
+        border-radius: 24px;
+        padding: 16px;
+        margin-bottom: 16px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+        border: 1px solid var(--cardLine);
+      }
+
+      .welcome-section {
+        margin-bottom: 18px;
+      }
+      .hello-text {
+        font-size: 28px;
+        font-weight: 700;
+        background: linear-gradient(135deg, var(--blue), var(--blue2));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .ai-chat-entry {
+        background: linear-gradient(135deg, var(--blue), var(--blue2));
+        border-radius: 28px;
+        padding: 14px 16px;
+        margin-bottom: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+      }
+      .ai-chat-entry-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .ai-chat-icon {
+        width: 44px;
+        height: 44px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 999px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 22px;
+      }
+      .ai-chat-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .ai-chat-h4 {
+        color: #fff;
+        font-size: 15px;
+        font-weight: 700;
+      }
+      .ai-chat-p {
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 12px;
+      }
+      .ai-chat-arrow {
+        color: #fff;
+        font-size: 18px;
+        font-weight: 700;
+      }
+
+      .hot-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 10px;
+      }
+      .hot-tag {
+        font-weight: 700;
+        font-size: 18px;
+        background: linear-gradient(135deg, var(--blue), var(--blue2));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .more-link {
+        font-size: 13px;
+        color: var(--blue);
+      }
+
+      .news-item {
+        padding: 14px 0;
+        border-bottom: 1px solid #f0f2f5;
+        cursor: pointer;
+      }
+      .news-item:last-child {
+        border-bottom: 0;
+      }
+      .news-title {
+        font-size: 15px;
+        font-weight: 800;
+        line-height: 1.35;
+        margin-bottom: 8px;
+      }
+      .news-ai-summary {
+        color: #334155;
+        font-size: 13px;
+        line-height: 1.55;
+        margin-bottom: 8px;
+      }
+      .news-meta {
+        display: flex;
+        gap: 10px;
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 10px;
+      }
+      .stock-chips {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+      }
+      .stock-chip {
+        font-size: 12px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: #f2f5fb;
+        border: 1px solid #e8edf5;
+        color: #35435c;
+      }
+      .news-narrative-bar {
+        margin-top: 6px;
+      }
+      .narrative-label {
+        display: flex;
+        justify-content: space-between;
+        color: #64748b;
+        font-size: 12px;
+        margin-bottom: 6px;
+      }
+      .narrative-track {
+        height: 8px;
+        border-radius: 999px;
+        background: #eef2ff;
+        border: 1px solid #e8edf5;
+        overflow: hidden;
+      }
+      .narrative-fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--blue2), var(--blue));
+        width: 50%;
+      }
+
+      /* topic page */
+      .topic-nav {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .back-btn {
+        width: 34px;
+        height: 34px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #fff;
+        border: 1px solid #e8edf5;
+        color: var(--blue);
+        cursor: pointer;
+      }
+      .topic-nav-title {
+        font-weight: 900;
+      }
+      .topic-title {
+        font-size: 18px;
+        font-weight: 900;
+        line-height: 1.35;
+      }
+      .section-label {
+        font-weight: 900;
+        color: var(--blue);
+        margin-bottom: 8px;
+      }
+      .section-label-inline {
+        margin-bottom: 12px;
+      }
+      .drive-card,
+      .logic-card {
+        background: #fff;
+        border-radius: 24px;
+        padding: 16px;
+        margin-bottom: 16px;
+        border: 1px solid var(--cardLine);
+      }
+      .drive-text {
+        color: #334155;
+        line-height: 1.65;
+        font-size: 13px;
+      }
+      .mini-timeline .tl-row {
+        display: grid;
+        grid-template-columns: 92px 1fr;
+        gap: 10px;
+        padding: 10px 0;
+        border-bottom: 1px dashed #eef1f6;
+      }
+      .mini-timeline .tl-row:last-child {
+        border-bottom: 0;
+      }
+      .tl-date {
+        font-weight: 900;
+        color: var(--blue);
+        font-size: 12px;
+      }
+      .tl-desc {
+        font-size: 12px;
+        color: #334155;
+        line-height: 1.5;
+      }
+      .tl-tag {
+        color: var(--muted);
+      }
+      .core-title {
+        font-weight: 900;
+        margin-bottom: 10px;
+      }
+      .stock-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 0;
+        border-bottom: 1px solid #eef1f6;
+      }
+      .stock-row:last-child {
+        border-bottom: 0;
+      }
+      .stock-change {
+        font-weight: 900;
+        color: var(--red);
+      }
+      .stock-change.negative {
+        color: var(--green);
+      }
+      .news-original {
+        background: #fff;
+        border-radius: 24px;
+        padding: 16px;
+        border: 1px solid var(--cardLine);
+        cursor: pointer;
+        margin-bottom: 16px;
+      }
+      .news-original-title {
+        font-weight: 900;
+        color: var(--blue);
+        margin-bottom: 8px;
+      }
+      .news-original-link {
+        color: var(--muted);
+        font-weight: 700;
+      }
+      .news-original-content {
+        font-size: 12px;
+        color: #334155;
+        line-height: 1.6;
+        white-space: pre-wrap;
+      }
+
+      /* stock page basic */
+      .section-title {
+        font-weight: 900;
+        font-size: 18px;
+        margin: 8px 0 12px;
+      }
+      .search-box {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .search-input {
+        flex: 1;
+        background: #fff;
+        border: 1px solid #e8edf5;
+        border-radius: 16px;
+        padding: 12px 12px;
+        color: #64748b;
+        cursor: pointer;
+      }
+      .search-btn {
+        background: var(--blue);
+        color: #fff;
+        font-weight: 800;
+        border-radius: 16px;
+        padding: 12px 14px;
+        cursor: pointer;
+      }
+      .stock-info-card {
+        background: #fff;
+        border: 1px solid var(--cardLine);
+        border-radius: 24px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+      .stock-name-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .stock-name-lg {
+        font-size: 18px;
+        font-weight: 900;
+      }
+      .stock-code-lg {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .price-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 10px;
+        margin-bottom: 6px;
+      }
+      .stock-price-lg {
+        font-size: 22px;
+        font-weight: 900;
+      }
+      .stock-change-percent {
+        font-weight: 900;
+        font-size: 14px;
+      }
+      .stock-change-percent.positive {
+        color: var(--red);
+      }
+      .stock-change-percent.negative {
+        color: var(--green);
+      }
+      .stock-detail {
+        color: #64748b;
+        font-size: 12px;
+        margin-bottom: 10px;
+      }
+      .position-meter-label {
+        display: flex;
+        justify-content: space-between;
+        color: #64748b;
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+      .position-meter-track {
+        position: relative;
+        height: 8px;
+        border-radius: 999px;
+        background: #eef2ff;
+        border: 1px solid #e8edf5;
+      }
+      .position-meter-marker {
+        position: absolute;
+        top: -5px;
+        width: 2px;
+        height: 18px;
+        background: var(--blue);
+      }
+      .position-meter-scale {
+        display: flex;
+        justify-content: space-between;
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 8px;
+      }
+      .percentile-def-hint {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+        margin-top: 8px;
+      }
+
+      /* chat page (simplified visual alignment) */
+      .page.page-chat {
+        padding: 0;
+      }
+      .chat-full-header {
+        padding: 14px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .chat-header-title {
+        font-weight: 900;
+      }
+      .chat-full-messages {
+        padding: 0 16px 140px;
+      }
+      .message {
+        display: flex;
+        margin: 10px 0;
+      }
+      .message.user-msg {
+        justify-content: flex-end;
+      }
+      .bubble {
+        max-width: 86%;
+        padding: 10px 12px;
+        border-radius: 16px;
+        border: 1px solid #e8edf5;
+        font-size: 12px;
+        line-height: 1.6;
+        background: #fff;
+      }
+      .user-msg .bubble {
+        background: rgba(15, 47, 115, 0.08);
+        border-color: rgba(15, 47, 115, 0.18);
+      }
+      .chat-footer-dock {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        max-width: 375px;
+        margin: 0 auto;
+        background: #fff;
+        border-top: 1px solid rgba(232, 237, 245, 0.9);
+        padding: 12px 12px 14px;
+      }
+      .chat-chips-wrap {
+        display: flex;
+        gap: 8px;
+        overflow: auto;
+        padding-bottom: 10px;
+      }
+      .chat-chip {
+        white-space: nowrap;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: #f2f5fb;
+        border: 1px solid #e8edf5;
+        color: #35435c;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .chat-full-input {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .chat-input {
+        flex: 1;
+        height: 42px;
+        border-radius: 16px;
+        border: 1px solid #e8edf5;
+        padding: 0 12px;
+        outline: none;
+        font-size: 12px;
+      }
+      .chat-send-btn {
+        width: 66px;
+        height: 42px;
+        border-radius: 16px;
+        background: var(--blue);
+        color: #fff;
+        font-weight: 900;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+
+      /* tab-bar */
+      .tab-bar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        max-width: 375px;
+        margin: 0 auto;
+        background: rgba(255, 255, 255, 0.96);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+        padding: 10px 10px 14px;
+        border-top: 1px solid var(--line);
+        z-index: 20;
+      }
+      .tab-item {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .tab-text {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .tab-item.active .tab-text {
+        color: var(--blue);
+      }
+      .tab-icon {
+        font-size: 20px;
+        line-height: 1;
+      }
+
+      /* stock-picker overlay */
+      .mask {
+        position: fixed;
+        inset: 0;
+        background: rgba(2, 6, 23, 0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 14px;
+        z-index: 60;
+      }
+      .mask.show {
+        display: flex;
+      }
+      .picker-page {
+        width: min(375px, 100%);
+        max-height: 86vh;
+        overflow: auto;
+        background: #f5f7fb;
+        border-radius: 18px;
+        padding: 14px;
+        border: 1px solid rgba(232, 237, 245, 0.9);
+      }
+      .picker-nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+      .picker-back {
+        width: 34px;
+        color: var(--blue);
+        font-size: 20px;
+        cursor: pointer;
+      }
+      .picker-back.ghost {
+        opacity: 0;
+        cursor: default;
+      }
+      .picker-title {
+        font-size: 16px;
+        font-weight: 900;
+        color: var(--blue);
+      }
+      .picker-search-row {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      .picker-input {
+        flex: 1;
+        height: 42px;
+        background: #fff;
+        border-radius: 12px;
+        padding: 0 12px;
+        font-size: 12px;
+        border: 1px solid #e8edf5;
+        outline: none;
+      }
+      .picker-btn {
+        width: 74px;
+        height: 42px;
+        border-radius: 12px;
+        background: var(--blue);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 900;
+        cursor: pointer;
+      }
+      .picker-section {
+        background: #fff;
+        border-radius: 16px;
+        padding: 12px;
+        margin-bottom: 10px;
+      }
+      .picker-section-title {
+        font-size: 13px;
+        font-weight: 900;
+        color: var(--blue);
+        margin-bottom: 10px;
+      }
+      .picker-status {
+        font-size: 12px;
+        color: #8a95a8;
+        padding: 8px 0;
+      }
+      .picker-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 0;
+        border-bottom: 1px solid #eef1f6;
+        cursor: pointer;
+      }
+      .picker-row:last-child {
+        border-bottom: 0;
+      }
+      .picker-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .picker-rank {
+        width: 18px;
+        height: 18px;
+        border-radius: 6px;
+        background: #ffefe1;
+        color: #de6b13;
+        font-size: 11px;
+        font-weight: 900;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .picker-name {
+        font-size: 13px;
+        color: #1f2937;
+      }
+      .picker-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .picker-code {
+        font-size: 12px;
+        color: #73829b;
+      }
+      .picker-pct {
+        font-size: 12px;
+        min-width: 64px;
+        text-align: right;
+        font-weight: 900;
+      }
+      .picker-pct.up {
+        color: var(--red);
+      }
+      .picker-pct.down {
+        color: var(--green);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-container" id="app">
+      <!-- HOME -->
+      <div class="page" id="page-home">
+        <div class="welcome-section">
+          <div class="hello-text">你好，投资者</div>
+        </div>
+        <div class="ai-chat-entry" id="btnAiEntry">
+          <div class="ai-chat-entry-left">
+            <div class="ai-chat-icon">🤖</div>
+            <div class="ai-chat-text">
+              <div class="ai-chat-h4">AI 智能助手</div>
+              <div class="ai-chat-p">股票分析 · 一键进入对话</div>
+            </div>
+          </div>
+          <div class="ai-chat-arrow">→</div>
+        </div>
+
+        <div class="card">
+          <div class="hot-header">
+            <div class="hot-tag">🔥 热点报道</div>
+            <div class="more-link">精选价值资讯 ></div>
+          </div>
+          <div id="homeNews"></div>
+        </div>
+      </div>
+
+      <!-- TOPIC -->
+      <div class="page" id="page-topic">
+        <div class="topic-nav">
+          <div class="back-btn" id="btnBackTopic">←</div>
+          <div class="topic-nav-title">话题精读</div>
+        </div>
+        <div id="topicBody"></div>
+      </div>
+
+      <!-- STOCK -->
+      <div class="page" id="page-stock">
+        <div class="section-title">📈 个股分析</div>
+        <div class="search-box">
+          <div class="search-input" id="btnOpenPicker">代码或名称，如 600519、宁德时代</div>
+          <div class="search-btn" id="btnOpenPicker2">选股</div>
+        </div>
+        <div class="stock-info-card" id="stockCard"></div>
+        <div class="card">
+          <div class="section-title" style="margin: 0 0 10px; font-size: 16px">A股涨幅榜</div>
+          <div id="hotList"></div>
+        </div>
+      </div>
+
+      <!-- CHAT -->
+      <div class="page page-chat" id="page-chat">
+        <div class="chat-full-header">
+          <div class="back-btn" id="btnBackChat">←</div>
+          <div class="chat-header-title">AI 智能问答</div>
+          <div style="width: 34px"></div>
+        </div>
+        <div class="chat-full-messages" id="chatMsgs"></div>
+        <div class="chat-footer-dock">
+          <div class="chat-chips-wrap" id="chatChips"></div>
+          <div class="chat-full-input">
+            <input class="chat-input" id="chatInput" placeholder="输入问题，与AI对话..." />
+            <div class="chat-send-btn" id="chatSend">发送</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- WATCHLIST -->
+      <div class="page page-watchlist" id="page-watchlist">
+        <div class="section-title watchlist-section-title">⭐ 我的观察清单</div>
+        <div class="card" id="watchBody"></div>
+      </div>
+
+      <!-- EARNINGS -->
+      <div class="page" id="page-earnings">
+        <div class="section-title">📄 AI 财报尽调</div>
+        <div class="card">
+          <div style="font-size: 12px; color: #64748b; line-height: 1.6">
+            上传后先做 <b>结构化解构</b>，再按需追问（对接真实模型后可逐条引用原文段落）。
+          </div>
+          <div style="margin-top: 12px; padding: 14px; border: 1px dashed #e8edf5; border-radius: 16px; text-align: center">
+            <div style="font-size: 22px">📂</div>
+            <div style="margin-top: 6px; font-weight: 900">点击上传财报文件</div>
+            <div style="margin-top: 6px; font-size: 12px; color: #64748b">支持 PDF（离线预览：不解析，仅展示结果样式）</div>
+          </div>
+        </div>
+        <div class="card">
+          <div style="font-weight: 900; color: var(--blue); margin-bottom: 10px">📋 勾稽与异常检查（示例）</div>
+          <div style="font-size: 12px; line-height: 1.7; color: #334155">
+            <div>✓ 营收与净利润增速同向（示例：营收 +15.8%，净利 +22.3%）</div>
+            <div>✓ 毛利率 34.2%，需结合同比/环比与同业区间核对</div>
+            <div>○ 经营现金流与净利润匹配度（待对接解析后自动勾稽）</div>
+            <div>○ 应收与存货周转是否异常（待对接解析后自动勾稽）</div>
+            <div>✓ 非经常性损益占比已粗览（示例：综合评级「增持」为演示输出）</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MINE -->
+      <div class="page" id="page-mine">
+        <div class="section-title mine-title">👤 我的</div>
+        <div class="card">
+          <div style="font-size: 12px; color: #64748b">设置 · 偏好 · 关于</div>
+        </div>
+      </div>
+
+      <!-- tab-bar -->
+      <div class="tab-bar" id="tabbar">
+        <div class="tab-item active" data-page="home"><div class="tab-icon">🏠</div><div class="tab-text">首页</div></div>
+        <div class="tab-item" data-page="stock"><div class="tab-icon">📈</div><div class="tab-text">个股分析</div></div>
+        <div class="tab-item" data-page="chat"><div class="tab-icon">💬</div><div class="tab-text">AI聊天</div></div>
+        <div class="tab-item" data-page="watchlist"><div class="tab-icon">⭐</div><div class="tab-text">自选</div></div>
+        <div class="tab-item" data-page="earnings"><div class="tab-icon">📄</div><div class="tab-text">财报</div></div>
+      </div>
+    </div>
+
+    <!-- stock-picker overlay -->
+    <div class="mask" id="pickerMask">
+      <div class="picker-page">
+        <div class="picker-nav">
+          <div class="picker-back" id="pickerBack">←</div>
+          <div class="picker-title">选择股票</div>
+          <div class="picker-back ghost">←</div>
+        </div>
+        <div class="picker-search-row">
+          <input class="picker-input" id="pickerInput" placeholder="输入股票代码或名称，如 600519、宁德时代" />
+          <div class="picker-btn" id="pickerAnalyze">分析</div>
+        </div>
+
+        <div class="picker-section">
+          <div class="picker-section-title">搜索历史</div>
+          <div id="pickerHistory" class="picker-status">暂无</div>
+        </div>
+        <div class="picker-section">
+          <div class="picker-section-title">搜索结果</div>
+          <div class="picker-status">匹配中…</div>
+          <div id="pickerSuggest"></div>
+        </div>
+        <div class="picker-section">
+          <div class="picker-section-title">A股涨幅榜</div>
+          <div id="pickerHot"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const mock = {
+        homeNewsList: [
+          {
+            id: "hs_tech",
+            title: "恒生科技指数涨幅扩大至4% 华虹半导体涨超10%",
+            summary:
+              "🤖 AI摘要：科技板块情绪回暖，恒生科技指数盘中涨幅扩大，半导体链条领涨。市场关注海外限制措施边际变化与国内产业扶持信号叠加带来的预期修复，但短线波动仍需警惕回撤风险。",
+            metaTime: "2026-04-08 09:46",
+            metaSource: "来源：财联社",
+            chips: ["华虹半导体 01347.HK", "中芯国际 00981.HK"],
+            narrativePercent: 78,
+            _raw: null,
+            url: "",
+          },
+          {
+            id: "a_open",
+            title: "A股高开震荡 券商板块拉升 量能回暖迹象",
+            summary:
+              "🤖 AI摘要：市场在宏观数据与政策预期交织下高开震荡，券商板块带动情绪修复。短线关注成交量能否持续放大与热点持续性，避免在分歧中追高。",
+            metaTime: "2026-04-08 10:12",
+            metaSource: "来源：新浪财经",
+            chips: ["中信证券 600030.SH", "东方财富 300059.SZ"],
+            narrativePercent: 69,
+            _raw: null,
+            url: "",
+          },
+        ],
+        topicDetail: {
+          title: "恒生科技指数涨幅扩大至4% 华虹半导体涨超10%",
+          causalChain: [
+            { label: "事件", text: "科技板块情绪回暖，半导体链条领涨。" },
+            { label: "影响路径", text: "政策预期与风险偏好回升 → 资金集中到高弹性方向。" },
+            { label: "可能受益", text: "半导体制造/设备链条与港股科技相关标的。" },
+            { label: "可能承压", text: "若外部扰动再起或量能不跟随，短线回吐压力加大。" },
+          ],
+          drive: "美国商务部部分放松对华先进制程设备出口限制执行，并释放技术管制微调信号；叠加国内产业支持与资金风险偏好回升。",
+          logic:
+            "外部管制边际缓和与国内产业支持共振，情绪推动半导体链条修复。短线看量能延续与回撤承接，避免分歧期追高。",
+          timeline: [
+            { date: "2026-04-08", title: "盘中涨幅扩大，半导体板块领涨", tag: "市场" },
+            { date: "2026-04-08", title: "新闻发布", tag: "事件" },
+          ],
+          stocks: [
+            { name: "华虹半导体", code: "01347.HK", change: "+10.3%", positive: true },
+            { name: "中芯国际", code: "00981.HK", change: "+8.2%", positive: true },
+          ],
+          originalNews: "【示例】这里展示你后端返回的 originalNews 文本（标题+摘要+来源），用于 web-view 打开原文。",
+          url: "",
+        },
+        stock: {
+          stockName: "请选择 A 股",
+          stockCode: "",
+          stockPrice: "¥--",
+          stockChange: "--",
+          stockChangePositive: true,
+          stockDetail: "—",
+          percentileLabel: "--",
+          percentileMarkerLeft: 0,
+          percentileDefHint:
+            "分位说明：近约250个交易日最低价—最高价区间内，按最新「收盘价」相对位置（百分比）；不是市盈率分位。",
+        },
+        hotList: [
+          { code: "603459", name: "N某某", pct: 20.0 },
+          { code: "300209", name: "某某科技", pct: 20.02 },
+          { code: "002463", name: "沪电股份", pct: 9.12 },
+          { code: "600519", name: "贵州茅台", pct: 2.31 },
+          { code: "601318", name: "中国平安", pct: 1.05 },
+          { code: "000651", name: "格力电器", pct: -0.82 },
+          { code: "000002", name: "万科A", pct: -1.12 },
+          { code: "601166", name: "兴业银行", pct: 0.46 },
+          { code: "600036", name: "招商银行", pct: -0.33 },
+          { code: "600276", name: "恒瑞医药", pct: 0.21 },
+        ],
+        watchlistItems: [
+          { code: "002463", name: "沪电股份", labelCode: "002463", changeStr: "+9.12%", positive: true },
+          { code: "600519", name: "贵州茅台", labelCode: "600519", changeStr: "+2.31%", positive: true },
+          { code: "000651", name: "格力电器", labelCode: "000651", changeStr: "-0.82%", positive: false },
+        ],
+        chatMessages: [
+          {
+            role: "ai",
+            text: "您好！我是财懂了AI助手。你可以直接提问做“通用全面分析”；若先在「个股分析」选择一只 A 股，我也能给更聚焦的个股解读。",
+          },
+          { role: "user", text: "今天A股整体情绪如何？我该关注哪些主线？" },
+          {
+            role: "ai",
+            text:
+              "从涨幅榜结构看，资金偏向高弹性方向，但指数权重也在护盘。主线建议优先看：半导体情绪持续性、券商带动的量能变化、以及宏观数据落地后的预期差。风险点是量能跟不上导致冲高回落。",
+          },
+        ],
+        chatQuickChips: [
+          { label: "分位与操作", q: "用三点说明：当前股价与近一年分位的关系，对操作意味着什么？" },
+          { label: "风险与机会", q: "列出与该股相关的两条主要风险与一条机会。" },
+          { label: "与大盘联动", q: "若大盘指数下周急跌，该股历史上通常如何反应？" },
+        ],
+      }
+
+      const state = {
+        activePage: "home",
+        topicDetail: null,
+        stockSearchInput: "",
+        history: ["600519", "002463", "300750"],
+      }
+
+      function $(id) {
+        return document.getElementById(id)
+      }
+
+      function showPage(p) {
+        state.activePage = p
+        const pages = ["home", "topic", "stock", "chat", "watchlist", "earnings", "mine"]
+        pages.forEach((x) => {
+          $("page-" + x).classList.toggle("active-page", x === p)
+        })
+        // tabbar active
+        $("tabbar")
+          .querySelectorAll(".tab-item")
+          .forEach((t) => t.classList.toggle("active", t.dataset.page === p))
+        // chat uses fixed dock; others ok
+        document.body.style.paddingBottom = p === "chat" ? "0" : ""
+      }
+
+      function pctText(p) {
+        const x = Number(p)
+        if (!Number.isFinite(x)) return "--"
+        return x >= 0 ? `+${x.toFixed(2)}%` : `${x.toFixed(2)}%`
+      }
+
+      function renderHome() {
+        const root = $("homeNews")
+        root.innerHTML = mock.homeNewsList
+          .map((it) => {
+            return `
+              <div class="news-item" data-id="${it.id}">
+                <div class="news-title">${escapeHtml(it.title)}</div>
+                <div class="news-ai-summary">${escapeHtml(it.summary)}</div>
+                <div class="news-meta"><span>${escapeHtml(it.metaTime)}</span><span>${escapeHtml(it.metaSource)}</span></div>
+                <div class="stock-chips">${(it.chips || []).map((c) => `<span class="stock-chip">${escapeHtml(c)}</span>`).join("")}</div>
+                <div class="news-narrative-bar">
+                  <div class="narrative-label"><span>叙事关注度</span><span>${Number(it.narrativePercent) || 0}%</span></div>
+                  <div class="narrative-track"><div class="narrative-fill" style="width:${Math.max(0, Math.min(100, Number(it.narrativePercent) || 0))}%;"></div></div>
+                </div>
+              </div>
+            `
+          })
+          .join("")
+        root.querySelectorAll("[data-id]").forEach((n) => {
+          n.addEventListener("click", () => {
+            state.topicDetail = { ...mock.topicDetail }
+            renderTopic()
+            showPage("topic")
+          })
+        })
+      }
+
+      function renderTopic() {
+        const d = state.topicDetail
+        const root = $("topicBody")
+        if (!d) {
+          root.innerHTML = `<div class="card">暂无内容</div>`
+          return
+        }
+        root.innerHTML = `
+          <div class="topic-header"><div class="topic-title">${escapeHtml(d.title || "")}</div></div>
+
+          <div class="card causal-card">
+            <div class="section-label section-label-inline">🔗 因果链</div>
+            ${(d.causalChain || [])
+              .map((x, idx) => {
+                const arrow = idx < d.causalChain.length - 1 ? `<div style="text-align:center;color:#94a3b8;padding:6px 0;">↓</div>` : ""
+                return `<div style="border:1px solid #eef1f6;border-radius:16px;padding:12px;margin-bottom:10px;">
+                  <div style="font-weight:900;color:#0f2f73;font-size:12px;margin-bottom:6px;">${escapeHtml(x.label || "")}</div>
+                  <div style="font-size:12px;color:#334155;line-height:1.6;">${escapeHtml(x.text || "")}</div>
+                </div>${arrow}`
+              })
+              .join("")}
+          </div>
+
+          <div class="drive-card"><div class="section-label">📌 驱动事件</div><div class="drive-text">${escapeHtml(d.drive || "")}</div></div>
+          <div class="logic-card"><div class="section-label">💡 投资逻辑</div><div class="drive-text">${escapeHtml(d.logic || "")}</div></div>
+
+          <div class="card timeline-card">
+            <div class="section-label section-label-inline">📅 关键时间轴 / 跟踪点</div>
+            <div class="mini-timeline">
+              ${(d.timeline || [])
+                .map((t) => {
+                  return `<div class="tl-row"><div class="tl-date">${escapeHtml(t.date || "")}</div><div class="tl-desc">${escapeHtml(
+                    t.title || ""
+                  )}<span class="tl-tag">${t.tag ? " · " + escapeHtml(t.tag) : ""}</span></div></div>`
+                })
+                .join("")}
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="core-title">📊 核心标的</div>
+            ${(d.stocks || [])
+              .map((s) => {
+                const cls = s.positive === false ? "negative" : ""
+                return `<div class="stock-row"><div><b>${escapeHtml(s.name || "")}</b><span style="color:#8e9aaf;font-size:12px;"> ${
+                  escapeHtml(s.code || "")
+                }</span></div><div class="stock-change ${cls}">${escapeHtml(s.change || "")}</div></div>`
+              })
+              .join("")}
+          </div>
+
+          <div class="news-original" id="btnOpenOrigin">
+            <div class="news-original-title">📰 新闻原文 <span class="news-original-link">点击查看 ></span></div>
+            <div class="news-original-content">${escapeHtml(d.originalNews || "")}</div>
+          </div>
+        `
+        const b = root.querySelector("#btnOpenOrigin")
+        if (b) b.addEventListener("click", () => alert("离线预览：真实小程序会打开 web-view 原文链接。"))
+      }
+
+      function renderStock() {
+        $("btnOpenPicker").textContent = state.stockSearchInput || "代码或名称，如 600519、宁德时代"
+        const s = mock.stock
+        $("stockCard").innerHTML = `
+          <div class="stock-name-row"><div class="stock-name-lg">${escapeHtml(s.stockName)}</div><div class="stock-code-lg">${escapeHtml(
+          s.stockCode
+        )}</div></div>
+          <div class="price-row"><div class="stock-price-lg">${escapeHtml(s.stockPrice)}</div><div class="stock-change-percent ${
+          s.stockChangePositive ? "positive" : "negative"
+        }">${escapeHtml(s.stockChange)}</div></div>
+          <div class="stock-detail">${escapeHtml(s.stockDetail)}</div>
+          <div class="position-meter">
+            <div class="position-meter-label"><span>近1年价格分位（可视化）</span><span>${escapeHtml(s.percentileLabel)}</span></div>
+            <div class="position-meter-track"><div class="position-meter-marker" style="left:${Number(s.percentileMarkerLeft) || 0}%;"></div></div>
+            <div class="position-meter-scale"><span>历史偏低</span><span>历史偏高</span></div>
+            <div class="percentile-def-hint">${escapeHtml(s.percentileDefHint)}</div>
+          </div>
+        `
+        $("hotList").innerHTML = mock.hotList
+          .slice(0, 10)
+          .map((r, idx) => {
+            const p = Number(r.pct)
+            const cls = Number.isFinite(p) ? (p >= 0 ? "up" : "down") : ""
+            return `
+              <div class="picker-row" data-code="${r.code}" data-name="${escapeAttr(r.name)}">
+                <div class="picker-left"><div class="picker-rank">${idx + 1}</div><div class="picker-name">${escapeHtml(r.name)}</div></div>
+                <div class="picker-right"><div class="picker-code">${escapeHtml(r.code)}</div><div class="picker-pct ${cls}">${pctText(p)}</div></div>
+              </div>
+            `
+          })
+          .join("")
+      }
+
+      function renderChat() {
+        $("chatMsgs").innerHTML = mock.chatMessages
+          .map((m) => {
+            const cls = m.role === "user" ? "user-msg" : "ai-msg"
+            return `<div class="message ${cls}"><div class="bubble">${escapeHtml(m.text || "")}</div></div>`
+          })
+          .join("")
+        $("chatChips").innerHTML = (mock.chatQuickChips || [])
+          .slice(0, 3)
+          .map((c) => `<div class="chat-chip" data-q="${escapeAttr(c.q)}">${escapeHtml(c.label)}</div>`)
+          .join("")
+        $("chatChips")
+          .querySelectorAll("[data-q]")
+          .forEach((x) =>
+            x.addEventListener("click", () => {
+              $("chatInput").value = x.dataset.q
+              $("chatInput").focus()
+            })
+          )
+      }
+
+      function renderWatchlist() {
+        const items = mock.watchlistItems || []
+        $("watchBody").innerHTML = items.length
+          ? items
+              .map((it) => {
+                const cls = it.positive ? "" : "negative"
+                return `<div class="stock-row"><div><b>${escapeHtml(it.name)}</b><span style="color:#8e9aaf;font-size:12px;"> ${
+                  escapeHtml(it.labelCode)
+                }</span></div><div class="stock-change ${cls}">${escapeHtml(it.changeStr)}</div></div>`
+              })
+              .join("")
+          : `<div style="font-size:12px;color:#8e9aaf;">暂无标的，可在「话题精读」中点击加入观察清单，或点右上角添加。</div>`
+      }
+
+      function openPicker() {
+        $("pickerMask").classList.add("show")
+        $("pickerInput").value = state.stockSearchInput || ""
+        renderPicker()
+      }
+      function closePicker() {
+        $("pickerMask").classList.remove("show")
+      }
+
+      function renderPicker() {
+        $("pickerHistory").innerHTML = state.history.length
+          ? state.history.map((c) => `<span class="stock-chip" data-his="${escapeAttr(c)}">${escapeHtml(c)}</span>`).join("")
+          : "暂无"
+        $("pickerHot").innerHTML = mock.hotList
+          .slice(0, 10)
+          .map((r, idx) => {
+            const p = Number(r.pct)
+            const cls = Number.isFinite(p) ? (p >= 0 ? "up" : "down") : ""
+            return `
+              <div class="picker-row" data-code="${r.code}" data-name="${escapeAttr(r.name)}">
+                <div class="picker-left"><div class="picker-rank">${idx + 1}</div><div class="picker-name">${escapeHtml(r.name)}</div></div>
+                <div class="picker-right"><div class="picker-code">${escapeHtml(r.code)}</div><div class="picker-pct ${cls}">${pctText(p)}</div></div>
+              </div>
+            `
+          })
+          .join("")
+        $("pickerSuggest").innerHTML = `
+          <div class="picker-row" data-code="002463" data-name="沪电股份">
+            <div class="picker-left"><div class="picker-name">沪电股份</div></div>
+            <div class="picker-right"><div class="picker-code">002463</div></div>
+          </div>
+        `
+        $("pickerMask")
+          .querySelectorAll("[data-code]")
+          .forEach((x) =>
+            x.addEventListener("click", () => {
+              const code = String(x.dataset.code || "").trim()
+              const name = String(x.dataset.name || "").trim()
+              if (!code) return
+              state.stockSearchInput = code
+              // 更新 stock mock
+              mock.stock.stockName = name || code
+              mock.stock.stockCode = code
+              mock.stock.stockPrice = "¥123.45"
+              mock.stock.stockChange = "+1.23%"
+              mock.stock.stockChangePositive = true
+              mock.stock.stockDetail = "今开122.00 最高125.00 最低121.50"
+              mock.stock.percentileLabel = "52.35%"
+              mock.stock.percentileMarkerLeft = 52.35
+              state.history = [code].concat(state.history.filter((v) => v !== code)).slice(0, 8)
+              closePicker()
+              renderStock()
+              showPage("stock")
+            })
+          )
+        $("pickerHistory")
+          .querySelectorAll("[data-his]")
+          .forEach((x) =>
+            x.addEventListener("click", () => {
+              $("pickerInput").value = x.dataset.his
+            })
+          )
+      }
+
+      function escapeHtml(s) {
+        return String(s || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;")
+          .replace(/'/g, "&#039;")
+      }
+      function escapeAttr(s) {
+        return escapeHtml(s).replace(/"/g, "&quot;")
+      }
+
+      // events
+      $("btnAiEntry").addEventListener("click", () => {
+        renderChat()
+        showPage("chat")
+      })
+      $("btnBackTopic").addEventListener("click", () => showPage("home"))
+      $("btnBackChat").addEventListener("click", () => showPage("home"))
+      $("btnOpenPicker").addEventListener("click", openPicker)
+      $("btnOpenPicker2").addEventListener("click", openPicker)
+      $("pickerBack").addEventListener("click", closePicker)
+      $("pickerMask").addEventListener("click", (e) => {
+        if (e.target === $("pickerMask")) closePicker()
+      })
+      $("pickerAnalyze").addEventListener("click", () => {
+        const v = String($("pickerInput").value || "").trim()
+        if (v) alert("离线预览：真实小程序会调用后端搜索并返回列表。")
+      })
+      $("chatSend").addEventListener("click", () => {
+        const q = String($("chatInput").value || "").trim()
+        if (!q) return
+        mock.chatMessages.push({ role: "user", text: q })
+        mock.chatMessages.push({ role: "ai", text: "离线预览：这里模拟后端 LLM 回复与 followUps。" })
+        $("chatInput").value = ""
+        renderChat()
+        showPage("chat")
+        window.scrollTo(0, document.body.scrollHeight)
+      })
+
+      $("tabbar")
+        .querySelectorAll(".tab-item")
+        .forEach((t) =>
+          t.addEventListener("click", () => {
+            const p = t.dataset.page
+            if (p === "chat") renderChat()
+            if (p === "stock") renderStock()
+            if (p === "watchlist") renderWatchlist()
+            showPage(p)
+          })
+        )
+
+      // initial
+      renderHome()
+      renderStock()
+      renderWatchlist()
+      renderChat()
+      showPage("home")
+    </script>
+  </body>
+</html>

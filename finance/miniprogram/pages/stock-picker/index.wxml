@@ -1,0 +1,76 @@
+<view class="picker-page">
+  <view class="picker-nav">
+    <view class="picker-back" bindtap="onBack">←</view>
+    <text class="picker-title">选择股票</text>
+    <view class="picker-back ghost">←</view>
+  </view>
+
+  <view class="picker-search-row">
+    <input
+      class="picker-input"
+      value="{{query}}"
+      placeholder="输入股票代码或名称，如 600519、宁德时代"
+      confirm-type="search"
+      bindinput="onInput"
+      bindconfirm="onAnalyzeTap"
+    />
+    <view class="picker-btn" bindtap="onAnalyzeTap">分析</view>
+  </view>
+
+  <view class="picker-section" wx:if="{{historyList && historyList.length}}">
+    <view class="picker-section-title">搜索历史</view>
+    <view class="history-chips">
+      <view
+        class="history-chip"
+        wx:for="{{historyList}}"
+        wx:key="code"
+        data-code="{{item.code}}"
+        data-name="{{item.name}}"
+        bindtap="onPickHistory"
+      >{{item.name}}</view>
+    </view>
+  </view>
+
+  <view class="picker-section" wx:if="{{suggestLoading || suggestList.length}}">
+    <view class="picker-section-title">搜索结果</view>
+    <view wx:if="{{suggestLoading}}" class="picker-status">匹配中…</view>
+    <block wx:else>
+      <view
+        class="picker-row {{selectedCode === item.code ? 'active' : ''}}"
+        wx:for="{{suggestList}}"
+        wx:key="code"
+        data-code="{{item.code}}"
+        data-name="{{item.name}}"
+        bindtap="onPickRow"
+      >
+        <text class="picker-name">{{item.name}}</text>
+        <text class="picker-code">{{item.code}}</text>
+      </view>
+    </block>
+  </view>
+
+  <view class="picker-section">
+    <view class="picker-section-title">A股涨幅榜</view>
+    <view wx:if="{{hotLoading}}" class="picker-status">加载中…</view>
+    <view wx:elif="{{!hotList.length}}" class="picker-status">暂无数据</view>
+    <block wx:else>
+      <view
+        class="picker-row {{selectedCode === item.code ? 'active' : ''}}"
+        wx:for="{{hotList}}"
+        wx:key="code"
+        data-code="{{item.code}}"
+        data-name="{{item.name}}"
+        bindtap="onPickRow"
+      >
+        <view class="picker-left">
+          <text class="picker-rank">{{index + 1}}</text>
+          <text class="picker-name">{{item.name}}</text>
+        </view>
+        <view class="picker-right">
+          <text class="picker-code">{{item.code}}</text>
+          <text class="picker-pct {{item.pct >= 0 ? 'up' : 'down'}}">{{item.pctText}}</text>
+        </view>
+      </view>
+    </block>
+  </view>
+</view>
