@@ -7,9 +7,49 @@ function makeUrl(path) {
   return p.startsWith('http') ? p : `${base}${p.startsWith('/') ? p : `/${p}`}`
 }
 
+/** 微信 fail 回调多为 { errMsg }，无 message；避免界面出现 [object Object] */
+function formatApiError(e, fallback = '请求失败') {
+  if (e == null || e === false) return fallback
+  if (typeof e === 'string') return e
+  if (e instanceof Error && e.message) return e.message
+  if (typeof e.errMsg === 'string' && e.errMsg) return e.errMsg
+  if (typeof e.message === 'string' && e.message) return e.message
+  if (typeof e.error === 'string') return e.error
+  try {
+    const s = JSON.stringify(e)
+    if (s && s !== '{}') return s
+  } catch (_) {}
+  return fallback
+}
+
+/**
+ * 针对「连不上 Flask」的常见报错补充可操作说明（ECONNREFUSED / 127.0.0.1）。
+ */
+function explainBackendConnectionError(message) {
+  const s = String(message || '').trim()
+  if (!s) return s
+  const refuse = /ECONNREFUSED|connection refused|连接被拒绝/i.test(s)
+  const local = /127\.0\.0\.1|localhost/i.test(s)
+  if (refuse && local) {
+    return (
+      `${s}\n\n` +
+      '【处理办法】\n' +
+      '1）开发者工具模拟器：先在电脑启动后端（finance/backend 目录执行启动命令，监听 5000 端口）。\n' +
+      '2）真机预览 / 手机：127.0.0.1 是手机本机，不是你的电脑。请把电脑连同一 WiFi，查电脑局域网 IP（如 192.168.x.x），' +
+      '在开发者工具控制台执行：wx.setStorageSync("finance_api_base","http://192.168.x.x:5000") 后再预览；并确认 Windows 防火墙允许 5000 端口入站。\n' +
+      '3）仍失败：检查小程序后台「开发」里是否勾选不校验合法域名（仅调试），以及后端是否为 host=0.0.0.0。'
+    )
+  }
+  if (refuse) {
+    return `${s}\n\n【处理办法】请确认 API 地址（getApiBase）与后端 IP、端口一致，且后端进程已启动。`
+  }
+  return s
+}
+
 function requestJson({ url, method = 'GET', data, timeout = 12000 }) {
   return new Promise((resolve, reject) => {
-    wx.request({
+    const m = String(method || 'GET').toUpperCase()
+    const req = {
       url: makeUrl(url),
       method,
       data,
@@ -20,10 +60,23 @@ function requestJson({ url, method = 'GET', data, timeout = 12000 }) {
           resolve(body || {})
           return
         }
-        reject(new Error(`HTTP ${res.statusCode}`))
+        let msg = `HTTP ${res.statusCode}`
+        if (body && typeof body === 'object' && body.error != null) {
+          msg =
+            typeof body.error === 'string'
+              ? body.error
+              : formatApiError(body.error, msg)
+        } else if (typeof body === 'string' && body.trim()) {
+          msg = body.trim().slice(0, 240)
+        }
+        reject(new Error(msg))
       },
-      fail: (err) => reject(err || new Error('request failed'))
-    })
+      fail: (err) => reject(new Error(formatApiError(err, '网络请求失败')))
+    }
+    if (m === 'POST' || m === 'PUT' || m === 'PATCH') {
+      req.header = { 'Content-Type': 'application/json' }
+    }
+    wx.request(req)
   })
 }
 
@@ -91,22 +144,32 @@ function uploadPdf(filePath, name = 'report.pdf') {
             resolve(body)
             return
           }
-          reject(new Error(body.error || `HTTP ${res.statusCode}`))
+          reject(
+            new Error(
+              body && typeof body.error === 'string'
+                ? body.error
+                : formatApiError(body && body.error, `HTTP ${res.statusCode}`)
+            )
+          )
         } catch (e) {
           reject(new Error('上传响应解析失败'))
         }
       },
-      fail: (err) => reject(err || new Error('upload failed'))
+      fail: (err) => reject(new Error(formatApiError(err, '上传失败')))
     })
   })
 }
 
 function startAnalyze(sessionId) {
-  return requestJson({ url: '/api/analyze', method: 'POST', data: { sessionId } })
+  return requestJson({ url: '/api/analyze', method: 'POST', data: { sessionId }, timeout: 30000 })
 }
 
 function getTask(taskId) {
   return requestJson({ url: `/api/tasks/${encodeURIComponent(String(taskId || ''))}` })
+}
+
+function regenPage(payload) {
+  return requestJson({ url: '/api/regen', method: 'POST', data: payload || {}, timeout: 30000 })
 }
 
 function getBaiduStockRssNews(limit = 20) {
@@ -146,6 +209,8 @@ module.exports = {
     return getApiBase()
   },
   DEFAULT_API_BASE,
+  formatApiError,
+  explainBackendConnectionError,
   getHotTopics,
   getHomeNews,
   getQuote,
@@ -158,6 +223,7 @@ module.exports = {
   uploadPdf,
   startAnalyze,
   getTask,
+  regenPage,
   getBaiduStockRssNews,
   getAggregateNews,
   getStockNews,

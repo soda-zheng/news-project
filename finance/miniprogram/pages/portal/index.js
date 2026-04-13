@@ -6,9 +6,23 @@ const {
   postStockLLMInsight,
   postResearchAnalyze,
   getHomeNewsEnhanced,
-  postNewsAiAnalyze
+  postNewsAiAnalyze,
+  uploadPdf,
+  startAnalyze,
+  getTask,
+  regenPage,
+  formatApiError,
+  explainBackendConnectionError
 } = require('../../utils/api')
 const { getCodeByKeyword } = require('../../utils/helpers')
+
+let parsePageToBlocks = () => []
+try {
+  // eslint-disable-next-line global-require
+  parsePageToBlocks = require('../../utils/earningsMarkdown').parsePageToBlocks || (() => [])
+} catch (e) {
+  parsePageToBlocks = () => []
+}
 
 const DEFAULT_PERCENTILE_HINT =
   '分位说明：近约250个交易日最低价—最高价区间内，按最新「收盘价」相对位置（百分比）；不是市盈率分位。'
@@ -559,6 +573,20 @@ Page({
     earningsVisible: false,
     earningsHtml: '',
     earningsFileName: '',
+    earningsSessionId: '',
+    earningsTaskId: '',
+    earningsTaskStatus: '',
+    earningsStage: '',
+    earningsLoading: false,
+    earningsPages: [],
+    earningsPageIndex: 0,
+    earningsPageBlocks: [],
+    earningsFacts: [],
+    earningsFactChoices: [],
+    earningsEditChoiceIndex: 0,
+    earningsEditVisible: false,
+    earningsEditQuestion: '',
+    earningsEditBusy: false,
     chatMsgAreaPx: 520,
     chatInputFocus: false,
     watchlistItems: [],
@@ -1608,14 +1636,187 @@ Page({
         this.setData({
           earningsVisible: true,
           earningsFileName: name,
-          earningsHtml:
-            '🤖 综合解读（示例）：收入与利润增速匹配度较好；毛利率处于需同业对照区间；若接入真实解析，将在上表逐项自动勾选并引用报表附注位置。'
+          earningsHtml: '',
+          earningsSessionId: '',
+          earningsTaskId: '',
+          earningsTaskStatus: 'uploading',
+          earningsStage: '上传中...',
+          earningsLoading: true,
+          earningsPages: [],
+          earningsPageIndex: 0,
+          earningsPageBlocks: []
         })
+        this._startEarningsFromFile(f.path, name)
       },
       fail: () => {
         wx.showToast({ title: '请选择 PDF 文件', icon: 'none' })
       }
     })
+  },
+
+  async _startEarningsFromFile(filePath, name) {
+    try {
+      const up = await uploadPdf(filePath, name)
+      const sid = String(up && up.sessionId ? up.sessionId : '').trim()
+      if (!sid) throw new Error('sessionId missing')
+      this.setData({ earningsSessionId: sid, earningsTaskStatus: 'queued', earningsStage: '任务已创建' })
+      const st = await startAnalyze(sid)
+      const tid = String(st && st.taskId ? st.taskId : '').trim()
+      if (!tid) throw new Error('taskId missing')
+      this.setData({ earningsTaskId: tid, earningsTaskStatus: 'running', earningsStage: '分析中...' })
+      this._pollEarningsTask(tid)
+    } catch (e) {
+      this.setData({
+        earningsLoading: false,
+        earningsTaskStatus: 'failed',
+        earningsStage: '启动失败',
+        earningsHtml: explainBackendConnectionError(formatApiError(e, '启动失败'))
+      })
+    }
+  },
+
+  _pollEarningsTask(taskId) {
+    const run = async () => {
+      try {
+        const out = await getTask(taskId)
+        const status = String(out && out.status ? out.status : '')
+        const stage = String(out && out.stage ? out.stage : '')
+        this.setData({ earningsTaskStatus: status, earningsStage: stage })
+        if (status === 'succeeded') {
+          const result = (out && out.result) || {}
+          const summary = String(result.summary || result.answer || '分析完成')
+          const pages = Array.isArray(result.pages) ? result.pages.map((x) => String(x || '')) : []
+          const facts = Array.isArray(result.facts) ? result.facts : []
+          const factChoices = this._buildEarningsFactChoices(facts)
+          const firstMd = pages[0] || ''
+          this.setData({
+            earningsLoading: false,
+            earningsHtml: summary,
+            earningsPages: pages,
+            earningsPageIndex: 0,
+            earningsPageBlocks: firstMd ? parsePageToBlocks(firstMd) : [],
+            earningsFacts: facts,
+            earningsFactChoices: factChoices,
+            earningsEditChoiceIndex: 0
+          })
+          return
+        }
+        if (status === 'failed') {
+          this.setData({
+            earningsLoading: false,
+            earningsHtml: String(out && out.error ? out.error : '分析失败'),
+            earningsPages: [],
+            earningsPageIndex: 0,
+            earningsPageBlocks: []
+          })
+          return
+        }
+      } catch (e) {
+        this.setData({
+          earningsLoading: false,
+          earningsTaskStatus: 'failed',
+          earningsStage: '轮询失败',
+          earningsHtml: '任务轮询失败，请稍后重试。',
+          earningsPages: [],
+          earningsPageIndex: 0,
+          earningsPageBlocks: []
+        })
+        return
+      }
+      this._earningsPollTimer = setTimeout(run, 1600)
+    }
+    run()
+  },
+
+  _syncEarningsPageBlocks(index) {
+    const pages = this.data.earningsPages || []
+    if (!pages.length) {
+      this.setData({ earningsPageIndex: 0, earningsPageBlocks: [] })
+      return
+    }
+    const i = Math.max(0, Math.min(Number(index) || 0, pages.length - 1))
+    const raw = String(pages[i] || '')
+    this.setData({
+      earningsPageIndex: i,
+      earningsPageBlocks: raw ? parsePageToBlocks(raw) : []
+    })
+  },
+
+  onEarningsPagePrev() {
+    const i = (this.data.earningsPageIndex || 0) - 1
+    if (i < 0) return
+    this._syncEarningsPageBlocks(i)
+  },
+
+  onEarningsPageNext() {
+    const pages = this.data.earningsPages || []
+    const i = (this.data.earningsPageIndex || 0) + 1
+    if (i >= pages.length) return
+    this._syncEarningsPageBlocks(i)
+  },
+
+  openEarningsEdit() {
+    this.setData({ earningsEditVisible: true, earningsEditQuestion: '', earningsEditChoiceIndex: 0 })
+  },
+
+  closeEarningsEdit() {
+    this.setData({ earningsEditVisible: false })
+  },
+
+  onEarningsEditQuestionInput(e) {
+    this.setData({ earningsEditQuestion: e.detail.value })
+  },
+
+  onEarningsEditChoiceChange(e) {
+    const idx = Number(e.detail.value || 0)
+    this.setData({ earningsEditChoiceIndex: Number.isFinite(idx) ? idx : 0 })
+  },
+
+  _buildEarningsFactChoices(facts) {
+    const out = []
+    const seen = new Set()
+    for (const f of facts || []) {
+      if (!f || typeof f !== 'object') continue
+      const ind = String(f.indicator || '').trim()
+      if (!ind) continue
+      const parts = [ind]
+      if (f.value) parts.push(String(f.value).trim())
+      if (f.page) parts.push(String(f.page).trim())
+      const s = parts.join('｜')
+      if (!s || seen.has(s)) continue
+      seen.add(s)
+      out.push(s)
+      if (out.length >= 240) break
+    }
+    return out
+  },
+
+  async saveEarningsEdit() {
+    if (this.data.earningsEditBusy) return
+    const sessionId = String(this.data.earningsSessionId || '').trim()
+    if (!sessionId) return
+    const idx = Number(this.data.earningsPageIndex || 0)
+    const customQuestion = String(this.data.earningsEditQuestion || '').trim()
+    const choices = this.data.earningsFactChoices || []
+    const choice = choices.length ? String(choices[this.data.earningsEditChoiceIndex || 0] || '').trim() : ''
+    this.setData({ earningsEditBusy: true })
+    try {
+      const resp = await regenPage({
+        sessionId,
+        pageIndex: idx,
+        customQuestion: customQuestion || undefined,
+        choice: choice || undefined
+      })
+      const pages = Array.isArray(resp.pages) ? resp.pages.map((x) => String(x || '')) : (this.data.earningsPages || [])
+      const nextIdx = resp.pageIndex != null ? Number(resp.pageIndex) : idx
+      this.setData({ earningsPages: pages, earningsEditVisible: false })
+      this._syncEarningsPageBlocks(nextIdx)
+      wx.showToast({ title: '已重新生成', icon: 'success' })
+    } catch (e) {
+      wx.showToast({ title: '重算失败', icon: 'none' })
+    } finally {
+      this.setData({ earningsEditBusy: false })
+    }
   },
 
   tapMenu(e) {

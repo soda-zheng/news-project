@@ -398,33 +398,66 @@
 
   <view class="page {{activePage === 'earnings' ? 'active-page' : ''}}">
     <view class="section-title">📄 AI 财报尽调</view>
-    <view class="text-small earnings-intro">上传后先做<text class="earnings-intro-strong">结构化解构</text>，再按需追问（对接真实模型后可逐条引用原文段落）。</view>
     <view class="upload-area" bindtap="onUploadAreaTap">
       <view class="upload-icon">📂</view>
       <view>点击上传财报文件</view>
       <view class="text-small">支持 PDF（小程序内从聊天选择文件；完整解析可对接后端）</view>
     </view>
     <view wx:if="{{earningsVisible}}" class="analysis-result">
-      <view class="earnings-section-title">📋 勾稽与异常检查（示例）</view>
-      <view class="earnings-checklist">
-        <view class="check-row"><text class="check-ok">✓</text><text>营收与净利润增速同向（示例：营收 +15.8%，净利 +22.3%）</text></view>
-        <view class="check-row"><text class="check-ok">✓</text><text>毛利率 34.2%，需结合同比/环比与同业区间核对</text></view>
-        <view class="check-row"><text class="check-pending">○</text><text>经营现金流与净利润匹配度（待对接解析后自动勾稽）</text></view>
-        <view class="check-row"><text class="check-pending">○</text><text>应收与存货周转是否异常（待对接解析后自动勾稽）</text></view>
-        <view class="check-row"><text class="check-ok">✓</text><text>非经常性损益占比已粗览（示例：综合评级「增持」为演示输出）</text></view>
-      </view>
-      <view class="earnings-faq-block">
-        <view class="earnings-faq-title">可追问方向</view>
-        <view class="earnings-faq-ul">
-          <view class="earnings-faq-li">营收增速与净利润增速是否匹配？主要靠量还是价？</view>
-          <view class="earnings-faq-li">毛利率变化来自成本、结构还是一次性因素？</view>
-          <view class="earnings-faq-li">经营现金流与净利润是否背离？应收/存货是否异常？</view>
-          <view class="earnings-faq-li">若剔除政府补助与非经常性损益，主业利润趋势如何？</view>
+      <view class="earnings-section-title">📋 财报任务状态</view>
+      <view class="text-small earnings-file-line" wx:if="{{earningsFileName}}">📄 文件：{{earningsFileName}}</view>
+      <view class="text-small earnings-file-line" wx:if="{{earningsTaskStatus}}">状态：{{earningsTaskStatus}} {{earningsStage}}</view>
+      <view class="text-small earnings-file-line" wx:if="{{earningsLoading}}">处理中，请稍候...</view>
+
+      <view class="earnings-section-title earnings-ai-title">🤖 AI 综合解读</view>
+      <view class="earnings-analysis-block">{{earningsHtml || '等待解析结果...'}}</view>
+
+      <view class="earnings-faq-block" wx:if="{{earningsPages.length}}">
+        <view class="earnings-faq-title">逐题解析</view>
+        <view class="earnings-pager-meta">
+          <text class="earnings-pager-tip">第 <text class="earnings-pager-num">{{earningsPageIndex + 1}}</text> / <text class="earnings-pager-num">{{earningsPages.length}}</text> 题</text>
+          <view class="earnings-edit-btn" bindtap="openEarningsEdit">编辑本题</view>
+        </view>
+        <view class="earnings-analysis-content">
+          <block wx:for="{{earningsPageBlocks}}" wx:key="index">
+            <view wx:if="{{item.type === 'h3'}}" class="earnings-ac-h3">{{item.text}}</view>
+            <view wx:if="{{item.type === 'sec'}}" class="earnings-ac-sec">{{item.text}}</view>
+            <view
+              wx:if="{{item.type === 'p'}}"
+              class="earnings-ac-p {{(index > 0 && earningsPageBlocks[index-1].type === 'sec' && earningsPageBlocks[index-1].text === '核心结论：') ? 'earnings-core-box' : ''}}"
+            >{{item.text}}</view>
+            <view wx:if="{{item.type === 'ul'}}" class="earnings-ac-ul">
+              <view class="earnings-ac-li" wx:for="{{item.items}}" wx:for-item="li" wx:key="*this">{{li}}</view>
+            </view>
+          </block>
+        </view>
+        <view class="earnings-pager-row">
+          <view class="earnings-pager-btn {{earningsPageIndex <= 0 ? 'disabled' : ''}}" bindtap="onEarningsPagePrev">← 上一题</view>
+          <view class="earnings-pager-btn {{earningsPageIndex >= earningsPages.length - 1 ? 'disabled' : ''}}" bindtap="onEarningsPageNext">下一题 →</view>
         </view>
       </view>
-      <view class="earnings-section-title earnings-ai-title">🤖 AI 综合解读（示例）</view>
-      <view class="text-small earnings-file-line" wx:if="{{earningsFileName}}">📄 文件：{{earningsFileName}}</view>
-      <view class="earnings-analysis-block">{{earningsHtml}}</view>
+    </view>
+  </view>
+
+  <view wx:if="{{earningsEditVisible}}" class="earnings-edit-mask" catchtouchmove="stopBubble" bindtap="closeEarningsEdit">
+    <view class="earnings-edit-modal" catchtap="stopBubble">
+      <view class="earnings-edit-title">编辑当前题目（仅重生成本题）</view>
+      <view class="earnings-edit-label">自定义问题（可选）</view>
+      <input
+        class="earnings-edit-input"
+        value="{{earningsEditQuestion}}"
+        placeholder="例如：本期毛利率提升主要来自结构还是成本？"
+        bindinput="onEarningsEditQuestionInput"
+      />
+      <view class="earnings-edit-label">换一个数据点（可选）</view>
+      <picker mode="selector" range="{{earningsFactChoices}}" value="{{earningsEditChoiceIndex}}" bindchange="onEarningsEditChoiceChange">
+        <view class="earnings-edit-picker">{{earningsFactChoices.length ? (earningsFactChoices[earningsEditChoiceIndex] || '选择一个数据点') : '暂无数据点（先生成解析）'}}</view>
+      </picker>
+      <view class="earnings-edit-hint text-small">仅选数据点、不填上方问题时，会自动生成一道分析问句（不再把「指标｜数值｜页码」当标题）。</view>
+      <view class="earnings-edit-actions">
+        <view class="earnings-edit-btn2 cancel" bindtap="closeEarningsEdit">取消</view>
+        <view class="earnings-edit-btn2 ok {{earningsEditBusy ? 'disabled' : ''}}" bindtap="saveEarningsEdit">保存并重算</view>
+      </view>
     </view>
   </view>
 

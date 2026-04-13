@@ -34,13 +34,11 @@ from services.stock_service import (
 from services.market_service import (
     get_stock_llm_insight,
     research_analyze as research_analyze_service,
-    upload_file,
-    create_task,
-    get_task,
     ai_analyze_news,
     generate_home_news_enhanced,
-    start_warmup_thread
+    start_warmup_thread,
 )
+from services.report_service import upload_file, create_task, get_task, regen_page
 from utils.helpers import (
     _now_str,
     _parse_symbol,
@@ -483,6 +481,28 @@ def task(task_id: str):
     if not t:
         return jsonify({"error": "task not found"}), 404
     return jsonify(t)
+
+
+@app.route("/api/regen", methods=["POST", "OPTIONS"])
+def regen():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    body = request.get_json(silent=True) or {}
+    session_id = str(body.get("sessionId") or "").strip()
+    page_index = body.get("pageIndex")
+    custom_q = str(body.get("customQuestion") or "").strip()
+    choice = str(body.get("choice") or "").strip()
+    if not session_id or page_index is None:
+        return jsonify({"error": "sessionId and pageIndex are required"}), 400
+    try:
+        idx = int(page_index)
+    except Exception:
+        return jsonify({"error": "pageIndex must be int"}), 400
+    try:
+        out = regen_page(session_id, idx, custom_question=custom_q, choice=choice)
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @app.route("/api/news/baidu", methods=["GET"])
