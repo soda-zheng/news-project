@@ -188,9 +188,12 @@ function getStockNews(symbol, limit = 10) {
   })
 }
 
-function getHomeNewsEnhanced(limit = 6) {
-  return requestJson({ 
-    url: `/api/news/home-enhanced?limit=${encodeURIComponent(String(limit || 6))}`,
+function getHomeNewsEnhanced(limit = 10, region = 'all') {
+  let url = `/api/news/home-enhanced?limit=${encodeURIComponent(String(limit || 10))}`
+  const r = String(region || 'all').trim()
+  if (r && r !== 'all') url += `&region=${encodeURIComponent(r)}`
+  return requestJson({
+    url,
     timeout: 300000
   })
 }

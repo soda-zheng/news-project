@@ -790,14 +790,21 @@ def ai_analyze_news(title: str, summary: str = "", url: str = "", source: str = 
     return result
 
 
-def generate_home_news_enhanced(limit: int = 6):
+def generate_home_news_enhanced(limit: int = 10, region: str = "all"):
     """
     增强版首页新闻：获取聚合新闻 + 对每条生成AI摘要/相关股票/关注度
-    返回格式与前端 HOME_NEWS_SEED 一致
+    返回格式与前端 HOME_NEWS_SEED 一致；region: all | domestic | global
     """
-    from services.news_service import get_news_summary
+    from services.news_service import get_news_summary, normalize_news_region_param
 
-    raw = get_news_summary(limit=min(max(limit * 2, 8), 20))
+    region = normalize_news_region_param(region)
+    if region == "all":
+        # 「全部」要在合并前列表里混入国际稿，pool 略大
+        pool_limit = min(max(limit * 4, 28), 50)
+    else:
+        pool_limit = min(max(limit * 8, 40), 100)
+
+    raw = get_news_summary(limit=pool_limit, region=region)
     items = raw.get("items") or []
     llm_env = _get_llm_env()
     llm_ready = bool(llm_env.get("api_base") and llm_env.get("model") and llm_env.get("api_key"))
@@ -816,6 +823,7 @@ def generate_home_news_enhanced(limit: int = 6):
         summary = item.get("summary", "")
         url = item.get("url", "")
         source = item.get("source", "")
+        reg = str(item.get("region") or "domestic")
 
         analysis = None
         if llm_ready and i < max_ai_items:
@@ -840,7 +848,7 @@ def generate_home_news_enhanced(limit: int = 6):
                 "metaSource": analysis.get("metaSource", source),
                 "chips": analysis.get("chips", []),
                 "heatPercentile": analysis.get("heat_percentile", 60),
-                "narrativePercent": analysis.get("narrativePercent", 60),
+                "region": reg,
                 "url": item.get("url", ""),
                 "_analysis": analysis,
             })
@@ -853,7 +861,7 @@ def generate_home_news_enhanced(limit: int = 6):
                 "metaSource": f"来源：{source}",
                 "chips": [],
                 "heatPercentile": 50,
-                "narrativePercent": 50,
+                "region": reg,
                 "url": item.get("url", ""),
                 "_analysis": None,
             })

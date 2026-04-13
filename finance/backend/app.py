@@ -21,6 +21,7 @@ from services.news_service import (
     fetch_akshare_stock_news,
     fetch_akshare_caixin_news,
     get_news_summary,
+    normalize_news_region_param,
     _fetch_sina_global_flash,
     _fetch_news_live
 )
@@ -583,8 +584,9 @@ def news_aggregate():
         limit = 30
     limit = max(1, min(50, limit))
     category = str(request.args.get("category", "") or "").strip()
+    region = normalize_news_region_param(request.args.get("region"))
     try:
-        result = get_news_summary(category=category if category else None, limit=limit)
+        result = get_news_summary(category=category if category else None, limit=limit, region=region)
         return jsonify({
             "code": 200,
             "msg": "success",
@@ -633,12 +635,13 @@ def news_home_enhanced():
     返回格式与前端 HOME_NEWS_SEED 一致
     """
     try:
-        limit = int(request.args.get("limit", "6") or "6")
+        limit = int(request.args.get("limit", "10") or "10")
     except Exception:
-        limit = 6
-    limit = max(1, min(10, limit))
+        limit = 10
+    limit = max(1, min(20, limit))
+    region = normalize_news_region_param(request.args.get("region"))
     try:
-        items = generate_home_news_enhanced(limit=limit)
+        items = generate_home_news_enhanced(limit=limit, region=region)
         return jsonify({
             "code": 200,
             "msg": "success",
@@ -646,6 +649,7 @@ def news_home_enhanced():
                 "update_time": _now_str(),
                 "items": items,
                 "source_count": len(items),
+                "region": region,
             },
         })
     except Exception as e:

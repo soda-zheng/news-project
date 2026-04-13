@@ -27,6 +27,11 @@ try {
 const DEFAULT_PERCENTILE_HINT =
   '分位说明：近约250个交易日最低价—最高价区间内，按最新「收盘价」相对位置（百分比）；不是市盈率分位。'
 
+function regionLabelFromCode(code) {
+  const m = { domestic: '国内', global: '国际', both: '内外' }
+  return m[String(code || '')] || ''
+}
+
 const DEFAULT_STOCK_QUICK_QUESTIONS = [
   '结合当前分位与10/20日动量，下一步走势更偏哪边？',
   '52周回撤下，最该盯的支撑/压力信号是什么？',
@@ -187,8 +192,6 @@ const topicDataMap = {
   }
 }
 
-const NARRATIVE_PERCENT_MAP = { oil: 72, soy: 58, fertilizer: 81, mixue: 65 }
-
 const HOME_NEWS_SEED = [
   {
     id: 'oil',
@@ -232,8 +235,8 @@ function buildHomeNewsList() {
   return HOME_NEWS_SEED.map((row) => {
     const t = topicDataMap[row.id]
     const heat = t && typeof t.heatPercentile === 'number' ? t.heatPercentile : 0
-    const narrativePct = NARRATIVE_PERCENT_MAP[row.id] != null ? NARRATIVE_PERCENT_MAP[row.id] : heat
-    return { ...row, heatPercentile: heat, narrativePercent: narrativePct }
+    const region = row.region || 'domestic'
+    return { ...row, heatPercentile: heat, region, regionLabel: regionLabelFromCode(region) }
   })
 }
 
@@ -256,7 +259,8 @@ function toChatChipsFromFollowUps(items) {
   return out
 }
 
-const WATCHLIST_STORAGE_KEY = 'portal_watchlist_codes'
+const { readWatchlistCodesRaw, saveWatchlistCodes } = require('../../utils/watchlistStorage')
+const { getStoredUser, clearWeChatUserProfile } = require('../../utils/auth')
 /** 上次在个股页选中的 A 股代码（仅本机） */
 const PORTAL_LAST_STOCK_KEY = 'portal_last_stock_code'
 const TOPIC_NOTES_KEY = 'portal_topic_notes'
@@ -590,10 +594,13 @@ Page({
     chatMsgAreaPx: 520,
     chatInputFocus: false,
     watchlistItems: [],
+    watchlistCount: 0,
+    profileUser: null,
     watchlistAddVisible: false,
     watchlistAddInput: '',
     watchlistHeaderMarginTopPx: 0,
     homeNewsList: [],
+    homeNewsRegion: 'all',
     _newsAnalysisCache: {},
     _homeNewsLoading: false,
     stockSuggestList: [],
@@ -624,19 +631,17 @@ Page({
   },
 
   _loadWatchlist() {
-    let codes = []
-    try {
-      const saved = wx.getStorageSync(WATCHLIST_STORAGE_KEY)
-      if (Array.isArray(saved) && saved.length) {
-        codes = saved.map((c) => String(c).trim()).filter(Boolean)
-      }
-    } catch (e) {}
+    const codes = readWatchlistCodesRaw()
     const rows = buildWatchlistRows(codes)
     try {
-      wx.setStorageSync(WATCHLIST_STORAGE_KEY, rows.map((r) => r.code))
+      saveWatchlistCodes(rows.map((r) => r.code))
     } catch (e3) {}
-    this.setData({ watchlistItems: rows })
+    this.setData({ watchlistItems: rows, watchlistCount: rows.length })
     this._refreshWatchlistQuotes(rows.map((r) => r.code))
+  },
+
+  _refreshProfile() {
+    this.setData({ profileUser: getStoredUser() })
   },
 
   _refreshWatchlistQuotes(codeList) {
@@ -660,7 +665,7 @@ Page({
               positive: pos
             }
           })
-          this.setData({ watchlistItems: items })
+          this.setData({ watchlistItems: items, watchlistCount: items.length })
         })
         .catch(() => {})
     })
@@ -702,12 +707,15 @@ Page({
       if (s) this.updateStockUI(s)
       this.refreshLiveQuote(last)
     }
+    this._refreshProfile()
     this._loadWatchlist()
     this._loadHomeNewsEnhanced()
   },
 
   onShow() {
     if (this.data.activePage === 'chat') this._layoutChatArea()
+    this._refreshProfile()
+    this._loadWatchlist()
   },
 
   switchPage(pageId) {
@@ -770,15 +778,22 @@ Page({
     if (page) this.switchPage(page)
   },
 
+  onHomeNewsScopeTap(e) {
+    const r = e.currentTarget.dataset.region
+    if (!r || r === this.data.homeNewsRegion) return
+    this.setData({ homeNewsRegion: r }, () => this._loadHomeNewsEnhanced())
+  },
+
   _loadHomeNewsEnhanced() {
     this.setData({ _homeNewsLoading: true })
-    getHomeNewsEnhanced(6)
+    getHomeNewsEnhanced(10, this.data.homeNewsRegion)
       .then((res) => {
         console.log('📰 首页新闻 API 响应:', res)
         if (res.code === 200 && res.data && Array.isArray(res.data.items)) {
           const items = res.data.items.map((item, idx) => {
             // 原文直链由后端尽量提供；前端不再把“搜索页”伪装成原文
             const url = item.url || ''
+            const region = item.region || 'domestic'
             return {
               id: item.id || `news_${idx}`,
               title: item.title || '',
@@ -787,7 +802,8 @@ Page({
               metaSource: item.metaSource || '',
               chips: item.chips || [],
               heatPercentile: item.heatPercentile || 60,
-              narrativePercent: item.narrativePercent || 60,
+              region,
+              regionLabel: regionLabelFromCode(region),
               url: url,
               _raw: item._analysis || null,
             }
@@ -853,7 +869,6 @@ Page({
               ...n,
               chips: d.chips || n.chips,
               heatPercentile: d.heat_percentile || n.heatPercentile,
-              narrativePercent: d.narrativePercent || n.narrativePercent,
               summary: d.ai_summary || n.summary,
               _raw: d,
             }
@@ -921,11 +936,7 @@ Page({
     const id = this.data.currentTopicId
     const topic = id ? topicDataMap[id] : null
     if (!topic || !topic.stocks || !topic.stocks.length) return
-    let codes = []
-    try {
-      const saved = wx.getStorageSync(WATCHLIST_STORAGE_KEY)
-      if (Array.isArray(saved) && saved.length) codes = saved.map((c) => String(c).trim()).filter(Boolean)
-    } catch (e) {}
+    let codes = readWatchlistCodesRaw()
     const seen = new Set(codes)
     let added = 0
     topic.stocks.forEach((s) => {
@@ -940,10 +951,10 @@ Page({
       return
     }
     try {
-      wx.setStorageSync(WATCHLIST_STORAGE_KEY, codes)
+      saveWatchlistCodes(codes)
     } catch (e2) {}
     const rows = buildWatchlistRows(codes)
-    this.setData({ watchlistItems: rows })
+    this.setData({ watchlistItems: rows, watchlistCount: rows.length })
     this._refreshWatchlistQuotes(rows.map((r) => r.code))
     wx.showToast({ title: `已加入 ${added} 只`, icon: 'success' })
   },
@@ -1587,6 +1598,28 @@ Page({
     this.switchPage('stock')
   },
 
+  onRemoveWatchlistItem(e) {
+    const code = String(e.currentTarget.dataset.code || '').trim()
+    if (!isAshare6digit(code)) return
+    wx.showModal({
+      title: '移除自选',
+      content: `确定从自选中移除 ${code}？`,
+      confirmText: '移除',
+      confirmColor: '#b91c1c',
+      success: (res) => {
+        if (!res.confirm) return
+        const next = readWatchlistCodesRaw().filter((c) => c !== code)
+        try {
+          saveWatchlistCodes(next)
+        } catch (err) {}
+        const rows = buildWatchlistRows(next)
+        this.setData({ watchlistItems: rows, watchlistCount: rows.length })
+        this._refreshWatchlistQuotes(rows.map((r) => r.code))
+        wx.showToast({ title: '已移除', icon: 'success' })
+      }
+    })
+  },
+
   openWatchlistAdd() {
     this.setData({ watchlistAddVisible: true, watchlistAddInput: '' })
   },
@@ -1613,11 +1646,12 @@ Page({
     }
     const next = cur.concat([key])
     try {
-      wx.setStorageSync(WATCHLIST_STORAGE_KEY, next)
+      saveWatchlistCodes(next)
     } catch (e) {}
     const rows = buildWatchlistRows(next)
     this.setData({
       watchlistItems: rows,
+      watchlistCount: rows.length,
       watchlistAddVisible: false,
       watchlistAddInput: ''
     })
@@ -1822,6 +1856,19 @@ Page({
   tapMenu(e) {
     const name = e.currentTarget.dataset.name || ''
     wx.showToast({ title: String(name), icon: 'none' })
+  },
+
+  goIndexLogin() {
+    wx.reLaunch({ url: '/pages/index/index' })
+  },
+
+  onMineWatchlistTap() {
+    this.switchPage('watchlist')
+  },
+
+  onLogoutTap() {
+    clearWeChatUserProfile()
+    wx.reLaunch({ url: '/pages/index/index' })
   },
 
   _applyEmptyStockUI() {

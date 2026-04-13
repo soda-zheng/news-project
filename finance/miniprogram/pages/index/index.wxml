@@ -11,8 +11,30 @@
   <view class="actions">
     <view class="primary-btn" bindtap="onStartTap">开始使用</view>
     <view class="login-row">
-      <text class="login-tip">已有账户？</text>
-      <text class="login-link">登录</text>
+      <text class="login-tip">绑定微信账号？</text>
+      <text class="login-link" bindtap="openBindModal">登录</text>
+    </view>
+    <view class="login-state-hint" wx:if="{{userInfo}}">已绑定：{{userInfo.nickName}}，自选与「我的」与此账号一致</view>
+  </view>
+
+  <!-- 点击「登录」后再出现：头像 + 昵称授权 -->
+  <view wx:if="{{showBindModal}}" class="login-modal-mask" catchtouchmove="noop" bindtap="closeBindModal">
+    <view class="login-modal" catchtap="noop">
+      <view class="login-modal-close" catchtap="closeBindModal">×</view>
+      <view class="login-modal-title">绑定账号</view>
+      <text class="login-modal-sub">请完善头像与昵称，用于「我的」与自选关联</text>
+      <button class="avatar-choose-btn" open-type="chooseAvatar" bind:chooseavatar="onChooseAvatar">
+        <image wx:if="{{draftAvatar}}" class="avatar-preview" src="{{draftAvatar}}" mode="aspectFill" />
+        <text wx:else class="avatar-placeholder">点击选择头像</text>
+      </button>
+      <input
+        class="nickname-input"
+        type="nickname"
+        placeholder="点击输入昵称"
+        value="{{draftNickname}}"
+        bindinput="onNicknameInput"
+      />
+      <view class="bind-btn" bindtap="onConfirmBind">完成绑定</view>
     </view>
   </view>
 </view>

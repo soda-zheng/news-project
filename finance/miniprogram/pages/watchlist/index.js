@@ -1,38 +1,25 @@
-const { watchList } = require('../../utils/data')
 const { normalizeCode, setSelectedCode } = require('../../utils/state')
-
-const STORAGE_KEY = 'watchlistCodes'
-
-function getDefaultCodes() {
-  return watchList.map((x) => x.code)
-}
+const { readWatchlistCodesRaw, saveWatchlistCodes } = require('../../utils/watchlistStorage')
 
 function buildList(codes) {
   return (codes || []).map((code) => ({
     code,
     name: code,
     price: '¥--',
-    tip: '自选'
+    tip: '自选',
   }))
 }
 
 Page({
   data: {
-    list: []
+    list: [],
   },
   onShow() {
-    const codes = this.getCodes()
+    const codes = readWatchlistCodesRaw()
     this.setData({ list: buildList(codes) })
   },
-  getCodes() {
-    try {
-      const raw = wx.getStorageSync(STORAGE_KEY)
-      if (Array.isArray(raw) && raw.length) return raw.map((x) => normalizeCode(x)).filter(Boolean)
-    } catch (e) {}
-    return getDefaultCodes()
-  },
   saveCodes(codes) {
-    try { wx.setStorageSync(STORAGE_KEY, codes) } catch (e) {}
+    saveWatchlistCodes(codes)
   },
   addTip() {
     wx.showModal({
@@ -46,7 +33,7 @@ Page({
           wx.showToast({ title: '请输入6位代码', icon: 'none' })
           return
         }
-        const prev = this.getCodes()
+        const prev = readWatchlistCodesRaw()
         if (prev.includes(code)) {
           wx.showToast({ title: '已在自选中', icon: 'none' })
           return
@@ -54,13 +41,12 @@ Page({
         const next = [code, ...prev].slice(0, 30)
         this.saveCodes(next)
         this.setData({ list: buildList(next) })
-      }
+      },
     })
   },
   pick(e) {
     const code = normalizeCode(String(e.currentTarget.dataset.code || ''))
     setSelectedCode(code)
     wx.navigateTo({ url: `/pages/aichat/index?code=${code}` })
-  }
+  },
 })
-

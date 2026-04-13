@@ -13,11 +13,29 @@
       </view>
       <text class="ai-chat-arrow">→</text>
     </view>
-    <view class="card">
+    <view class="card news-home-card">
       <view class="hot-header">
         <text class="hot-tag">🔥 热点报道</text>
         <text class="more-link">精选价值资讯 ></text>
       </view>
+      <view class="news-scope-tabs">
+        <view
+          class="news-scope-tab {{homeNewsRegion === 'all' ? 'active' : ''}}"
+          data-region="all"
+          bindtap="onHomeNewsScopeTap"
+        >全部</view>
+        <view
+          class="news-scope-tab {{homeNewsRegion === 'domestic' ? 'active' : ''}}"
+          data-region="domestic"
+          bindtap="onHomeNewsScopeTap"
+        >国内</view>
+        <view
+          class="news-scope-tab {{homeNewsRegion === 'global' ? 'active' : ''}}"
+          data-region="global"
+          bindtap="onHomeNewsScopeTap"
+        >国际</view>
+      </view>
+      <view wx:if="{{_homeNewsLoading}}" class="news-loading-hint">加载中…</view>
       <view
         class="news-item"
         wx:for="{{homeNewsList}}"
@@ -26,6 +44,10 @@
         data-url="{{item.url}}"
         bindtap="onNewsTap"
       >
+        <view
+          wx:if="{{item.regionLabel}}"
+          class="news-region-pill {{item.region === 'global' ? 'is-global' : ''}} {{item.region === 'both' ? 'is-both' : ''}}"
+        >{{item.regionLabel}}</view>
         <view class="news-title">{{item.title}}</view>
         <view class="news-ai-summary">{{item.summary}}</view>
         <view class="news-meta">
@@ -34,15 +56,6 @@
         </view>
         <view class="stock-chips">
           <text class="stock-chip" wx:for="{{item.chips}}" wx:for-item="chip" wx:key="*this">{{chip}}</text>
-        </view>
-        <view class="news-narrative-bar">
-          <view class="narrative-label">
-            <text>叙事关注度</text>
-            <text>{{item.narrativePercent}}%</text>
-          </view>
-          <view class="narrative-track">
-            <view class="narrative-fill" style="width: {{item.narrativePercent}}%;"></view>
-          </view>
         </view>
       </view>
     </view>
@@ -359,18 +372,19 @@
         bindtap="openWatchlistAdd"
       >+ 添加</view>
     </view>
-    <view class="text-small watchlist-page-hint">默认示例 + 在「话题精读」中可将核心标的加入此处（仅存本机）。</view>
     <view class="card">
       <block wx:if="{{watchlistItems.length}}">
-        <view
-          class="watchlist-item"
-          wx:for="{{watchlistItems}}"
-          wx:key="code"
-          data-code="{{item.code}}"
-          bindtap="onWatchItemTap"
-        >
-          <view><text class="wl-strong">{{item.name}}</text><text class="text-small"> {{item.labelCode}}</text></view>
-          <text class="stock-change {{item.positive ? '' : 'negative'}}">{{item.changeStr}}</text>
+        <view class="watchlist-item" wx:for="{{watchlistItems}}" wx:key="code">
+          <view class="watchlist-item-main" data-code="{{item.code}}" bindtap="onWatchItemTap">
+            <view><text class="wl-strong">{{item.name}}</text><text class="text-small"> {{item.labelCode}}</text></view>
+            <text class="stock-change-percent watchlist-pct {{item.changeStr == '--' ? 'neutral' : (item.positive ? 'positive' : 'negative')}}">{{item.changeStr}}</text>
+          </view>
+          <view
+            class="watchlist-remove-btn"
+            hover-class="watchlist-remove-btn-hover"
+            catchtap="onRemoveWatchlistItem"
+            data-code="{{item.code}}"
+          >移除</view>
         </view>
       </block>
       <view wx:else class="watchlist-empty-hint">暂无标的，可在「话题精读」中点击加入观察清单，或点右上角添加。</view>
@@ -463,8 +477,25 @@
 
   <view class="page {{activePage === 'mine' ? 'active-page' : ''}}">
     <view class="section-title mine-title">👤 我的</view>
-    <view class="card">
-      <view class="mine-tip text-small">设置 · 偏好 · 关于</view>
+    <view class="card" wx:if="{{profileUser}}">
+      <view class="mine-user-row">
+        <image class="mine-avatar" src="{{profileUser.avatarUrl}}" mode="aspectFill" />
+        <view class="mine-user-meta">
+          <text class="mine-nick">{{profileUser.nickName}}</text>
+          <text class="text-small muted">与启动页微信登录为同一账号</text>
+        </view>
+      </view>
+    </view>
+    <view class="card" wx:else>
+      <view class="mine-tip text-small">尚未微信登录：自选暂存在本机「游客」空间，登录后与账号绑定。</view>
+      <view class="mine-login-btn" bindtap="goIndexLogin">去启动页登录</view>
+    </view>
+    <view class="card mine-watch-entry" bindtap="onMineWatchlistTap">
+      <view class="mine-watch-entry-top">
+        <text class="core-title mine-watch-title">⭐ 我的自选</text>
+        <text class="menu-arrow muted">›</text>
+      </view>
+      <text class="text-small muted" wx:if="{{watchlistCount > 0}}">共 {{watchlistCount}} 只</text>
     </view>
     <view class="card">
       <view class="core-title">快捷入口</view>
@@ -473,9 +504,12 @@
         <text class="menu-arrow muted">›</text>
       </view>
     </view>
-    <view class="card">
-      <view class="core-title">说明</view>
-      <view class="text-small line-p">与财懂了主流程一致，更多能力可在各 Tab 中使用。</view>
+    <view class="card" wx:if="{{profileUser}}">
+      <view class="menu-row" bindtap="onLogoutTap">
+        <text class="menu-name mine-logout">退出登录</text>
+        <text class="menu-arrow muted">›</text>
+      </view>
+      <view class="text-small muted mine-logout-hint">退出后清除微信头像昵称；自选仍保留在本机同一账号空间中。</view>
     </view>
   </view>
 

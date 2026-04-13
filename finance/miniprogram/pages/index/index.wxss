@@ -79,7 +79,11 @@ page {
 .login-row {
   margin-top: 28rpx;
   margin-bottom: 4rpx;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12rpx;
   font-size: 36rpx;
 }
 
@@ -88,8 +92,139 @@ page {
 }
 
 .login-link {
-  margin-left: 12rpx;
-  color: #111827;
-  font-size: 36rpx;
+  color: #0f2f73;
   font-weight: 600;
+}
+
+/* 弹层：仅点击「登录」后出现 */
+.login-modal-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx 32rpx;
+  box-sizing: border-box;
+}
+
+.login-modal {
+  position: relative;
+  width: 100%;
+  max-width: 620rpx;
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 40rpx 32rpx 36rpx;
+  background: #fff;
+  border-radius: 28rpx;
+  box-shadow: 0 24rpx 64rpx rgba(0, 0, 0, 0.18);
+}
+
+.login-modal-close {
+  position: absolute;
+  top: 16rpx;
+  right: 24rpx;
+  width: 56rpx;
+  height: 56rpx;
+  line-height: 52rpx;
+  text-align: center;
+  font-size: 44rpx;
+  color: #94a3b8;
+  z-index: 2;
+}
+
+.login-modal-title {
+  font-size: 34rpx;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 12rpx;
+  padding-right: 48rpx;
+}
+
+.login-modal-sub {
+  display: block;
+  font-size: 24rpx;
+  color: #64748b;
+  line-height: 1.5;
+  margin-bottom: 28rpx;
+}
+
+.avatar-choose-btn {
+  width: 160rpx;
+  height: 160rpx;
+  margin: 0 auto 24rpx;
+  padding: 0;
+  border-radius: 50%;
+  border: 2rpx dashed #cbd5e1;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.avatar-choose-btn::after {
+  border: none;
+}
+
+.avatar-preview {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+.avatar-placeholder {
+  font-size: 24rpx;
+  color: #64748b;
+  padding: 16rpx;
+  text-align: center;
+}
+
+.nickname-input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 88rpx;
+  line-height: 88rpx;
+  padding: 0 24rpx;
+  margin-bottom: 24rpx;
+  border-radius: 16rpx;
+  border: 2rpx solid #e2e8f0;
+  background: #fff;
+  font-size: 30rpx;
+}
+
+.bind-btn {
+  height: 88rpx;
+  line-height: 88rpx;
+  text-align: center;
+  border-radius: 44rpx;
+  background: #0f2f73;
+  color: #fff;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+.login-legacy {
+  margin-top: 20rpx;
+  text-align: center;
+  color: #94a3b8;
+  text-decoration: underline;
+  padding: 12rpx 0;
+}
+
+.text-small {
+  font-size: 24rpx;
+}
+
+.login-state-hint {
+  margin-top: 24rpx;
+  padding: 0 24rpx;
+  text-align: center;
+  font-size: 26rpx;
+  color: #0f2f73;
+  line-height: 1.5;
 }
