@@ -13,6 +13,290 @@ page {
   padding-bottom: calc(148rpx + env(safe-area-inset-bottom));
 }
 
+/* 主题外观：仅影响 portal 页（theme-system = 默认浅色） */
+.app-container.theme-dark {
+  background: #0b1220;
+}
+.app-container.theme-dark .page {
+  color: #e5e7eb;
+}
+.app-container.theme-dark .card,
+.app-container.theme-dark .analysis-result,
+.app-container.theme-dark .stock-info-card,
+.app-container.theme-dark .upload-area,
+.app-container.theme-dark .earnings-analysis-content {
+  background: #0f172a !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+.app-container.theme-dark .hello-text,
+.app-container.theme-dark .section-title,
+.app-container.theme-dark .hot-tag,
+.app-container.theme-dark .core-title,
+.app-container.theme-dark .picker-section-title,
+.app-container.theme-dark .stock-name-lg,
+.app-container.theme-dark .earnings-section-title,
+.app-container.theme-dark .earnings-ac-h3,
+.app-container.theme-dark .earnings-ac-sec {
+  color: #e5e7eb !important;
+}
+.app-container.theme-dark .text-small,
+.app-container.theme-dark .muted,
+.app-container.theme-dark .news-ai-summary,
+.app-container.theme-dark .news-meta,
+.app-container.theme-dark .stock-detail,
+.app-container.theme-dark .earnings-ac-p,
+.app-container.theme-dark .earnings-ac-li {
+  color: rgba(226, 232, 240, 0.78) !important;
+}
+.app-container.theme-dark .tab-bar {
+  background: rgba(15, 23, 42, 0.96);
+  border-top-color: rgba(148, 163, 184, 0.18);
+}
+.app-container.theme-dark .tab-item .tab-text {
+  color: rgba(226, 232, 240, 0.75);
+}
+.app-container.theme-dark .tab-item.active .tab-text,
+.app-container.theme-dark .tab-item.active .tab-icon {
+  color: #e5e7eb;
+}
+
+/* 深色模式：修正“渐变文字 + 透明色”在暗底下发灰/看不清 */
+.app-container.theme-dark .hello-text,
+.app-container.theme-dark .hot-tag {
+  background: none !important;
+  -webkit-background-clip: initial !important;
+  background-clip: initial !important;
+  color: #e5e7eb !important;
+}
+
+/* 深色模式：热点区与新闻列表 */
+.app-container.theme-dark .more-link {
+  color: rgba(226, 232, 240, 0.78) !important;
+}
+.app-container.theme-dark .news-scope-tabs {
+  background: rgba(148, 163, 184, 0.14) !important;
+}
+.app-container.theme-dark .news-scope-tab {
+  color: rgba(226, 232, 240, 0.72) !important;
+}
+.app-container.theme-dark .news-scope-tab.active {
+  background: rgba(15, 47, 115, 0.35) !important;
+  color: #e5e7eb !important;
+  box-shadow: none !important;
+}
+.app-container.theme-dark .news-region-pill {
+  background: rgba(148, 163, 184, 0.16) !important;
+  color: rgba(226, 232, 240, 0.85) !important;
+}
+.app-container.theme-dark .news-item {
+  border-bottom-color: rgba(148, 163, 184, 0.14) !important;
+}
+.app-container.theme-dark .news-item:active {
+  background: rgba(148, 163, 184, 0.08) !important;
+}
+.app-container.theme-dark .news-title {
+  color: #e5e7eb !important;
+}
+.app-container.theme-dark .news-ai-summary {
+  background: rgba(30, 41, 59, 0.7) !important;
+  border-left-color: rgba(56, 189, 248, 0.55) !important;
+  color: rgba(226, 232, 240, 0.78) !important;
+}
+.app-container.theme-dark .news-meta {
+  color: rgba(226, 232, 240, 0.55) !important;
+}
+.app-container.theme-dark .stock-chip {
+  background: rgba(148, 163, 184, 0.14) !important;
+  color: rgba(226, 232, 240, 0.85) !important;
+}
+
+/* 深色模式：个股分析搜索框 */
+.app-container.theme-dark .search-box {
+  background: rgba(15, 23, 42, 0.92) !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+.app-container.theme-dark .search-input {
+  color: rgba(226, 232, 240, 0.86) !important;
+}
+.app-container.theme-dark .search-btn {
+  background: rgba(15, 47, 115, 0.55) !important;
+  color: #e5e7eb !important;
+}
+
+/* 深色模式：个股快问按钮 */
+.app-container.theme-dark .stock-quick-btn {
+  background: rgba(148, 163, 184, 0.12) !important;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  color: rgba(226, 232, 240, 0.86) !important;
+}
+
+/* 深色模式：财报解析区域增强可读性 */
+.app-container.theme-dark .earnings-analysis-block {
+  background: rgba(30, 41, 59, 0.65) !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
+  border-left-color: rgba(56, 189, 248, 0.55) !important;
+  color: rgba(226, 232, 240, 0.82) !important;
+}
+.app-container.theme-dark .earnings-core-box {
+  background: rgba(30, 41, 59, 0.75) !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
+  border-left-color: rgba(56, 189, 248, 0.55) !important;
+  color: rgba(226, 232, 240, 0.9) !important;
+}
+.app-container.theme-dark .earnings-ac-li::before {
+  color: rgba(226, 232, 240, 0.9) !important;
+}
+
+/* 深色模式：话题精读（因果链内层白框 / 驱动卡 / 逻辑卡 / 原文卡 / 时间轴） */
+.app-container.theme-dark .back-btn {
+  color: rgba(226, 232, 240, 0.9) !important;
+}
+.app-container.theme-dark .topic-title,
+.app-container.theme-dark .section-label,
+.app-container.theme-dark .core-title,
+.app-container.theme-dark .topic-nav-title {
+  color: #e5e7eb !important;
+}
+.app-container.theme-dark .drive-card,
+.app-container.theme-dark .logic-card,
+.app-container.theme-dark .news-original,
+.app-container.theme-dark .timeline-card,
+.app-container.theme-dark .causal-node {
+  background: rgba(15, 23, 42, 0.92) !important;
+  border-left-color: rgba(56, 189, 248, 0.45) !important;
+}
+.app-container.theme-dark .topic-notes-card {
+  background: rgba(15, 23, 42, 0.92) !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+.app-container.theme-dark .topic-note-textarea {
+  background: rgba(30, 41, 59, 0.72) !important;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  color: rgba(226, 232, 240, 0.9) !important;
+}
+.app-container.theme-dark .btn-secondary-sm {
+  background: rgba(148, 163, 184, 0.12) !important;
+  border: 1rpx solid rgba(148, 163, 184, 0.22) !important;
+  color: rgba(226, 232, 240, 0.9) !important;
+}
+.app-container.theme-dark .drive-text,
+.app-container.theme-dark .news-original-content,
+.app-container.theme-dark .causal-body,
+.app-container.theme-dark .causal-box-body,
+.app-container.theme-dark .tl-desc {
+  color: rgba(226, 232, 240, 0.82) !important;
+}
+.app-container.theme-dark .tl-date,
+.app-container.theme-dark .tl-tag {
+  color: rgba(226, 232, 240, 0.62) !important;
+}
+.app-container.theme-dark .stock-row {
+  border-bottom-color: rgba(148, 163, 184, 0.14) !important;
+}
+.app-container.theme-dark .stock-change {
+  color: rgba(226, 232, 240, 0.86) !important;
+}
+.app-container.theme-dark .causal-arrow,
+.app-container.theme-dark .causal-arrow-down {
+  color: rgba(226, 232, 240, 0.55) !important;
+}
+.app-container.theme-dark .causal-box {
+  background: rgba(30, 41, 59, 0.72) !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+.app-container.theme-dark .causal-tag,
+.app-container.theme-dark .causal-label {
+  color: rgba(226, 232, 240, 0.9) !important;
+}
+.app-container.theme-dark .news-original-title {
+  color: rgba(226, 232, 240, 0.9) !important;
+}
+.app-container.theme-dark .news-original-link {
+  color: rgba(226, 232, 240, 0.7) !important;
+}
+
+/* 深色模式：个股分析（分位条/提示、快问区白底、K线区白底） */
+.app-container.theme-dark .stock-suggest-status,
+.app-container.theme-dark .stock-suggest-name,
+.app-container.theme-dark .stock-price-lg,
+.app-container.theme-dark .stock-name-lg {
+  color: rgba(226, 232, 240, 0.9) !important;
+}
+.app-container.theme-dark .stock-code-lg,
+.app-container.theme-dark .stock-suggest-code,
+.app-container.theme-dark .percentile-def-hint,
+.app-container.theme-dark .position-meter-label,
+.app-container.theme-dark .position-meter-scale,
+.app-container.theme-dark .kline-tip,
+.app-container.theme-dark .kline-placeholder {
+  color: rgba(226, 232, 240, 0.62) !important;
+}
+.app-container.theme-dark .stock-suggest-row {
+  border-bottom-color: rgba(148, 163, 184, 0.14) !important;
+}
+.app-container.theme-dark .stock-suggest-row:active {
+  background: rgba(148, 163, 184, 0.08) !important;
+}
+.app-container.theme-dark .position-meter-track {
+  background: linear-gradient(90deg, rgba(226, 232, 240, 0.18) 0%, rgba(148, 163, 184, 0.35) 45%, rgba(56, 189, 248, 0.55) 100%) !important;
+}
+.app-container.theme-dark .position-meter-marker {
+  background: rgba(226, 232, 240, 0.9) !important;
+  box-shadow: none !important;
+}
+.app-container.theme-dark .stock-quick-row {
+  background: rgba(15, 23, 42, 0.92) !important;
+}
+.app-container.theme-dark .kline-title {
+  color: rgba(226, 232, 240, 0.9) !important;
+}
+.app-container.theme-dark .kline-btn {
+  background: rgba(148, 163, 184, 0.14) !important;
+  color: rgba(226, 232, 240, 0.85) !important;
+}
+.app-container.theme-dark .kline-canvas-wrap {
+  background: rgba(2, 6, 23, 0.5) !important;
+}
+.app-container.theme-dark .kline-dom-axis-item {
+  color: rgba(226, 232, 240, 0.62) !important;
+}
+.app-container.theme-dark .kline-dom-grid-line {
+  background: rgba(148, 163, 184, 0.16) !important;
+}
+.app-container.theme-dark .kline-dom-date {
+  color: rgba(226, 232, 240, 0.62) !important;
+}
+
+/* 深色模式：个股下半区（历史位置 / AI智能研判 / 操作建议） */
+.app-container.theme-dark .history-card,
+.app-container.theme-dark .ai-insight-card,
+.app-container.theme-dark .suggestion-card {
+  background: rgba(15, 23, 42, 0.92) !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+.app-container.theme-dark .history-title,
+.app-container.theme-dark .insight-title,
+.app-container.theme-dark .suggestion-title {
+  color: #e5e7eb !important;
+}
+.app-container.theme-dark .history-item {
+  background: rgba(30, 41, 59, 0.72) !important;
+}
+.app-container.theme-dark .history-label,
+.app-container.theme-dark .history-sub {
+  color: rgba(226, 232, 240, 0.62) !important;
+}
+.app-container.theme-dark .history-value {
+  color: rgba(226, 232, 240, 0.9) !important;
+}
+.app-container.theme-dark .insight-li {
+  color: rgba(226, 232, 240, 0.84) !important;
+}
+.app-container.theme-dark .disclaimer {
+  color: rgba(226, 232, 240, 0.55) !important;
+  border-top-color: rgba(148, 163, 184, 0.16) !important;
+}
+
 /* AI 问答：上方浅灰底，底部单独白底输入区 */
 .app-container.app-chat-mode {
   padding-bottom: 0;

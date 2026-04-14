@@ -38,6 +38,17 @@ const DEFAULT_STOCK_QUICK_QUESTIONS = [
   '若继续偏弱，未持仓者如何控风险与等信号？'
 ]
 
+const PORTAL_UI_THEME_KEY = 'portal_ui_theme' // system|light|dark
+const PORTAL_REMINDER_SETTINGS_KEY = 'portal_reminder_settings'
+
+function defaultReminderSettings() {
+  return {
+    priceMove: true,
+    newsFlash: true,
+    earningsUpdate: true
+  }
+}
+
 /** 与后端 daily-bars / LLM 输入统一：保留两位小数展示，游标用未截断数值 */
 function percentileUiFromNumber(p) {
   const x = Number(p)
@@ -516,6 +527,7 @@ function buildStockKlineOption(d) {
 Page({
   data: {
     statusBarHeight: 44,
+    uiTheme: 'system',
     activePage: 'home',
     tabSelected: 'home',
     topicDetail: null,
@@ -599,6 +611,7 @@ Page({
     watchlistAddVisible: false,
     watchlistAddInput: '',
     watchlistHeaderMarginTopPx: 0,
+    reminderSettings: defaultReminderSettings(),
     homeNewsList: [],
     homeNewsRegion: 'all',
     _newsAnalysisCache: {},
@@ -607,7 +620,8 @@ Page({
     stockSuggestLoading: false,
     currentTopicId: '',
     topicNoteBody: '',
-    topicNoteSaved: ''
+    topicNoteSaved: '',
+    chatBoundSymbol: ''
   },
 
   _layoutChatArea() {
@@ -696,6 +710,15 @@ Page({
       }
     } catch (e) {}
     this.setData({ statusBarHeight: h, watchlistHeaderMarginTopPx })
+
+    // 主题外观：仅影响 portal 页显示（不改其它页面）
+    let theme = 'system'
+    try {
+      theme = String(wx.getStorageSync(PORTAL_UI_THEME_KEY) || 'system').trim() || 'system'
+    } catch (e) {}
+    if (theme !== 'light' && theme !== 'dark') theme = 'system'
+    this.setData({ uiTheme: theme, reminderSettings: this._loadReminderSettings() })
+
     let last = ''
     try {
       last = String(wx.getStorageSync(PORTAL_LAST_STOCK_KEY) || '').trim()
@@ -960,6 +983,8 @@ Page({
   },
 
   onAiChatEntry() {
+    // 首页直接进入聊天，不强绑个股
+    this.setData({ chatBoundSymbol: '' })
     this.switchPage('chat')
   },
 
@@ -1008,7 +1033,13 @@ Page({
   onStockQuickAsk(e) {
     const q0 = e.currentTarget.dataset.q
     if (!q0) return
-
+    // 从个股页快捷提问：强绑定当前股票到 chat 会话
+    const bound =
+      resolveStockKey(this.data.stockSearchInput) ||
+      normalizeToAshare6(this.data.stockCode) ||
+      normalizeToAshare6((this.data.currentStock && this.data.currentStock.code) || '') ||
+      ''
+    this.setData({ chatBoundSymbol: bound })
     this.switchPage('chat')
     this.setData({ chatInput: String(q0), chatInputFocus: true })
   },
@@ -1038,7 +1069,12 @@ Page({
     const text = String(raw || '').trim()
     if (!text) return
     const cur = this.data.currentStock
-    const code = cur && String(cur.code || '').trim()
+    const code =
+      normalizeToAshare6((cur && cur.code) || '') ||
+      normalizeToAshare6(this.data.stockCode || '') ||
+      resolveStockKey(this.data.stockSearchInput) ||
+      normalizeToAshare6(this.data.chatBoundSymbol || '') ||
+      ''
     const msgs = this.data.chatMessages.concat([{ role: 'user', text }])
     this.setData({
       chatMessages: msgs,
@@ -1061,7 +1097,7 @@ Page({
         this.setData({
           chatMessages: nextMsgs,
           chatScrollToId: `msg-${nextMsgs.length - 1}`,
-          chatQuickChips: chips.length ? chips : CHAT_QUICK_CHIPS
+          chatQuickChips: chips.length ? chips : (this.data.chatQuickChips || CHAT_QUICK_CHIPS)
         })
       })
       .catch(() => {
@@ -1854,8 +1890,153 @@ Page({
   },
 
   tapMenu(e) {
-    const name = e.currentTarget.dataset.name || ''
-    wx.showToast({ title: String(name), icon: 'none' })
+    const name = String(e.currentTarget.dataset.name || '').trim()
+    if (!name) return
+
+    // 仅在当前页内做轻量功能，不改动其它模块
+    if (name === '账户与安全') {
+      const u = this.data.profileUser
+      if (!u) {
+        wx.showModal({
+          title: '账户与安全',
+          content: '当前未登录。是否前往启动页登录？',
+          confirmText: '去登录',
+          cancelText: '取消',
+          success: (res) => {
+            if (res && res.confirm) this.goIndexLogin()
+          }
+        })
+        return
+      }
+      wx.showActionSheet({
+        itemList: ['查看账户信息', '安全退出当前账号'],
+        success: (res) => {
+          const idx = Number(res && res.tapIndex)
+          if (idx === 0) {
+            const nick = String(u.nickName || '未命名用户')
+            const wl = Number(this.data.watchlistCount || 0)
+            wx.showModal({
+              title: '账户信息',
+              content: `昵称：${nick}\n登录方式：微信授权\n本机自选数量：${wl} 只\n\n若需切换账号，请使用“安全退出当前账号”。`,
+              showCancel: false
+            })
+            return
+          }
+          if (idx === 1) {
+            wx.showModal({
+              title: '安全退出',
+              content: '退出后将清除当前账号的微信头像与昵称展示，是否继续？',
+              confirmText: '确认退出',
+              cancelText: '取消',
+              success: (rs) => {
+                if (rs && rs.confirm) this.onLogoutTap()
+              }
+            })
+          }
+        }
+      })
+      return
+    }
+
+    if (name === '提醒设置') {
+      const cur = this.data.reminderSettings || defaultReminderSettings()
+      wx.showActionSheet({
+        itemList: [
+          `价格异动提醒：${cur.priceMove ? '开' : '关'}`,
+          `新闻快讯提醒：${cur.newsFlash ? '开' : '关'}`,
+          `财报更新提醒：${cur.earningsUpdate ? '开' : '关'}`,
+          '恢复默认设置'
+        ],
+        success: (res) => {
+          const idx = Number(res && res.tapIndex)
+          let next = { ...defaultReminderSettings(), ...cur }
+          if (idx === 0) next.priceMove = !next.priceMove
+          else if (idx === 1) next.newsFlash = !next.newsFlash
+          else if (idx === 2) next.earningsUpdate = !next.earningsUpdate
+          else if (idx === 3) next = defaultReminderSettings()
+          else return
+          this._saveReminderSettings(next)
+          wx.showToast({ title: '提醒设置已保存', icon: 'success' })
+        }
+      })
+      return
+    }
+
+    if (name === '主题外观') {
+      wx.showActionSheet({
+        itemList: ['跟随系统（推荐）', '浅色模式预览', '深色模式预览'],
+        success: (res) => {
+          const idx = typeof res.tapIndex === 'number' ? res.tapIndex : -1
+          const next = idx === 1 ? 'light' : idx === 2 ? 'dark' : 'system'
+          this.setData({ uiTheme: next })
+          try {
+            wx.setStorageSync(PORTAL_UI_THEME_KEY, next)
+          } catch (e2) {}
+          wx.showToast({
+            title: next === 'dark' ? '深色模式' : next === 'light' ? '浅色模式' : '跟随系统',
+            icon: 'none'
+          })
+        }
+      })
+      return
+    }
+
+    if (name === '关于应用') {
+      let version = 'dev'
+      let envVersion = 'develop'
+      try {
+        const info = typeof wx.getAccountInfoSync === 'function' ? wx.getAccountInfoSync() : null
+        const mp = info && info.miniProgram ? info.miniProgram : {}
+        version = String(mp.version || 'dev')
+        envVersion = String(mp.envVersion || 'develop')
+      } catch (e) {}
+      const diagnose = `财懂了\n版本：${version}\n环境：${envVersion}\n时间：${new Date().toLocaleString()}\n平台：微信小程序`
+      wx.showModal({
+        title: '关于应用',
+        content:
+          `「财报 & 个股 AI 助手」\n版本：${version}（${envVersion}）\n\n仅供学习与界面演示，不构成投资建议。`,
+        confirmText: '复制信息',
+        cancelText: '关闭',
+        success: (res) => {
+          if (res && res.confirm) {
+            wx.setClipboardData({
+              data: diagnose,
+              success: () => wx.showToast({ title: '已复制', icon: 'success' })
+            })
+          }
+        }
+      })
+      return
+    }
+
+    // 兜底：未知菜单项仍提示名称，避免无响应
+    wx.showToast({ title: name, icon: 'none' })
+  },
+
+  _loadReminderSettings() {
+    try {
+      const x = wx.getStorageSync(PORTAL_REMINDER_SETTINGS_KEY)
+      if (!x || typeof x !== 'object') return defaultReminderSettings()
+      return {
+        priceMove: x.priceMove !== false,
+        newsFlash: x.newsFlash !== false,
+        earningsUpdate: x.earningsUpdate !== false
+      }
+    } catch (e) {
+      return defaultReminderSettings()
+    }
+  },
+
+  _saveReminderSettings(next) {
+    const out = {
+      priceMove: !!(next && next.priceMove),
+      newsFlash: !!(next && next.newsFlash),
+      earningsUpdate: !!(next && next.earningsUpdate)
+    }
+    this.setData({ reminderSettings: out })
+    try {
+      wx.setStorageSync(PORTAL_REMINDER_SETTINGS_KEY, out)
+    } catch (e) {}
   },
 
   goIndexLogin() {

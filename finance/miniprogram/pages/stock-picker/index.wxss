@@ -2,7 +2,52 @@
   min-height: 100vh;
   background: #f5f7fb;
   padding: 28rpx;
+  /* 顶部安全区补偿：避免内容在真机/刘海屏上“偏上过高” */
+  padding-top: calc(28rpx + env(safe-area-inset-top) + 128rpx);
   box-sizing: border-box;
+}
+
+/* 深色模式（跟随 portal 的主题设置） */
+.picker-page.theme-dark {
+  background: #0b1220;
+}
+.picker-page.theme-dark .picker-title,
+.picker-page.theme-dark .picker-back,
+.picker-page.theme-dark .picker-section-title,
+.picker-page.theme-dark .picker-name {
+  color: #e5e7eb;
+}
+.picker-page.theme-dark .picker-input {
+  background: rgba(15, 23, 42, 0.92);
+  border-color: rgba(148, 163, 184, 0.2);
+  color: rgba(226, 232, 240, 0.9);
+}
+.picker-page.theme-dark .picker-btn {
+  background: rgba(15, 47, 115, 0.62);
+  color: #e5e7eb;
+}
+.picker-page.theme-dark .picker-section {
+  background: rgba(15, 23, 42, 0.92);
+  border: 1rpx solid rgba(148, 163, 184, 0.16);
+}
+.picker-page.theme-dark .history-chip {
+  background: rgba(148, 163, 184, 0.14);
+  color: rgba(226, 232, 240, 0.86);
+}
+.picker-page.theme-dark .picker-status,
+.picker-page.theme-dark .picker-code {
+  color: rgba(226, 232, 240, 0.62);
+}
+.picker-page.theme-dark .picker-row {
+  border-bottom-color: rgba(148, 163, 184, 0.16);
+}
+.picker-page.theme-dark .picker-row.active .picker-name,
+.picker-page.theme-dark .picker-row.active .picker-code {
+  color: #e5e7eb;
+}
+.picker-page.theme-dark .picker-rank {
+  background: rgba(251, 146, 60, 0.2);
+  color: #fdba74;
 }
 
 .picker-nav {

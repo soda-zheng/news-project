@@ -1,4 +1,4 @@
-<view class="app-container {{activePage === 'chat' ? 'app-chat-mode' : ''}}" style="padding-top: {{statusBarHeight}}px;">
+<view class="app-container theme-{{uiTheme}} {{activePage === 'chat' ? 'app-chat-mode' : ''}}" style="padding-top: {{statusBarHeight}}px;">
   <view class="page {{activePage === 'home' ? 'active-page' : ''}}">
     <view class="welcome-section">
       <view class="hello-text">你好，投资者</view>
@@ -16,7 +16,7 @@
     <view class="card news-home-card">
       <view class="hot-header">
         <text class="hot-tag">🔥 热点报道</text>
-        <text class="more-link">精选价值资讯 ></text>
+        <text class="more-link">精选价值资讯</text>
       </view>
       <view class="news-scope-tabs">
         <view

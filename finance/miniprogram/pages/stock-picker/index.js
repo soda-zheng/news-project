@@ -3,6 +3,7 @@ const HISTORY_KEY = 'stock_picker_history'
 const HOT_CACHE_KEY = 'stock_picker_hot_sina_cache'
 const HOT_CACHE_TTL_LIVE_MS = 10 * 60 * 1000
 const HOT_CACHE_TTL_CLOSE_MS = 24 * 60 * 60 * 1000
+const PORTAL_UI_THEME_KEY = 'portal_ui_theme' // 与 portal 主题设置保持一致
 
 function normalizeA6(raw) {
   const s = String(raw || '').trim()
@@ -13,6 +14,7 @@ function normalizeA6(raw) {
 
 Page({
   data: {
+    uiTheme: 'system',
     query: '',
     selectedCode: '',
     selectedName: '',
@@ -26,7 +28,12 @@ Page({
 
   onLoad(query) {
     const q = query && query.q ? String(query.q) : ''
-    this.setData({ query: q, historyList: this.loadHistory() })
+    let theme = 'system'
+    try {
+      theme = String(wx.getStorageSync(PORTAL_UI_THEME_KEY) || 'system').trim() || 'system'
+    } catch (e) {}
+    if (theme !== 'light' && theme !== 'dark') theme = 'system'
+    this.setData({ uiTheme: theme, query: q, historyList: this.loadHistory() })
     this.loadHot()
     if (q) this.fetchSuggest(q)
   },

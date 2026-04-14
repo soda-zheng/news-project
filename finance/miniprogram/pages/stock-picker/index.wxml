@@ -1,4 +1,4 @@
-<view class="picker-page">
+<view class="picker-page theme-{{uiTheme}}">
   <view class="picker-nav">
     <view class="picker-back" bindtap="onBack">←</view>
     <text class="picker-title">选择股票</text>
