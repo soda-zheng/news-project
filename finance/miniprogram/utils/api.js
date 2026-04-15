@@ -46,7 +46,7 @@ function explainBackendConnectionError(message) {
   return s
 }
 
-function requestJson({ url, method = 'GET', data, timeout = 12000 }) {
+function requestJson({ url, method = 'GET', data, timeout = 40000 }) {
   return new Promise((resolve, reject) => {
     const m = String(method || 'GET').toUpperCase()
     const req = {
@@ -87,10 +87,12 @@ function getHotTopics(limit = 10, source = 'auto', strict = false) {
   })
 }
 
-function getHomeNews(page = 1, num = 6) {
-  return requestJson({
-    url: `/api/news/home?page=${encodeURIComponent(String(page || 1))}&num=${encodeURIComponent(String(num || 6))}`
-  })
+function getHomeNews(page = 1, num) {
+  let url = `/api/news/home?page=${encodeURIComponent(String(page || 1))}`
+  if (num != null && String(num).trim() !== '') {
+    url += `&num=${encodeURIComponent(String(num))}`
+  }
+  return requestJson({ url, timeout: 120000 })
 }
 
 function getQuote(symbol) {
@@ -188,13 +190,16 @@ function getStockNews(symbol, limit = 10) {
   })
 }
 
-function getHomeNewsEnhanced(limit = 10, region = 'all') {
-  let url = `/api/news/home-enhanced?limit=${encodeURIComponent(String(limit || 10))}`
+function getHomeNewsEnhanced(limit, region = 'all') {
+  let url = '/api/news/home-enhanced'
+  if (limit != null && String(limit).trim() !== '') {
+    url += `?limit=${encodeURIComponent(String(limit))}`
+  }
   const r = String(region || 'all').trim()
-  if (r && r !== 'all') url += `&region=${encodeURIComponent(r)}`
+  if (r && r !== 'all') url += `${url.includes('?') ? '&' : '?'}region=${encodeURIComponent(r)}`
   return requestJson({
     url,
-    timeout: 300000
+    timeout: 1200000
   })
 }
 
@@ -203,7 +208,7 @@ function postNewsAiAnalyze(payload) {
     url: '/api/news/ai-analyze',
     method: 'POST',
     data: payload || {},
-    timeout: 300000
+    timeout: 600000
   })
 }
 

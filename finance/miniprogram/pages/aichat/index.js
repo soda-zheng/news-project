@@ -1,7 +1,7 @@
 const { stockShell } = require('../../utils/data')
 const { getCodeByKeyword } = require('../../utils/helpers')
 const { getQuote, postStockInsight, getHotTopics } = require('../../utils/api')
-const { getSelectedCode, setSelectedCode, normalizeCode } = require('../../utils/state')
+const { setSelectedCode, normalizeCode } = require('../../utils/state')
 
 function pickStock(code) {
   return stockShell(code)
@@ -16,7 +16,7 @@ Page({
   },
   onLoad(query) {
     const qCode = query && query.code ? String(query.code) : ''
-    const code = normalizeCode(qCode) || getSelectedCode()
+    const code = normalizeCode(qCode)
     this.applyCode(code)
     if (code) this.refreshCurrentAnalysis(code)
   },

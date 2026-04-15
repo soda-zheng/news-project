@@ -30,3 +30,4 @@ python app.py
 - 财报分析相关为任务模拟流程（upload -> analyze -> tasks 轮询），用于前端联调。
 - 热点新闻依赖 **akshare** 拉取 `https://finance.sina.com.cn/7x24` 同源快讯数据；需本机可访问外网。
 - 若 akshare 未安装或请求失败，`/api/news/home` 会自动回退为原有新浪滚动新闻筛选逻辑。
+- 可在 `backend/.env` 配置 `HOME_NEWS_LIMIT`（1-20）控制首页新闻默认条数；当前端不传 `num/limit` 时生效。

@@ -55,8 +55,19 @@ from utils.hot_close_snapshot import (
 app = Flask(__name__)
 app.json.ensure_ascii = False
 
+
+def _env_int(name: str, default: int, lo: int, hi: int) -> int:
+    raw = str(os.environ.get(name, str(default)) or str(default)).strip()
+    try:
+        v = int(raw)
+    except Exception:
+        v = int(default)
+    return max(lo, min(hi, v))
+
+
 # 与 demo2 一致：内存缓存 + 后台定时刷新（仅 A 股 sh_a + sz_a 合并榜）
 _TOPICS_HOT_REFRESH_SEC = float(os.environ.get("TOPICS_HOT_REFRESH_SEC", "300"))
+_HOME_NEWS_LIMIT = _env_int("HOME_NEWS_LIMIT", 10, 1, 20)
 _HOT_MEM_LOCK = threading.Lock()
 _HOT_MEM: dict[str, tuple[float, object]] = {}
 _TOPICS_SCHED_STARTED = False
@@ -244,7 +255,8 @@ def topics_hot():
 def news_home():
     try:
         page = int(request.args.get("page", "1") or "1")
-        num = int(request.args.get("num", "20") or "20")
+        num_raw = str(request.args.get("num", "") or "").strip()
+        num = int(num_raw) if num_raw else _HOME_NEWS_LIMIT
     except Exception:
         return jsonify({"code": 400, "msg": "参数错误：page/num", "data": None})
     page = max(1, page)
@@ -635,9 +647,10 @@ def news_home_enhanced():
     返回格式与前端 HOME_NEWS_SEED 一致
     """
     try:
-        limit = int(request.args.get("limit", "10") or "10")
+        limit_raw = str(request.args.get("limit", "") or "").strip()
+        limit = int(limit_raw) if limit_raw else _HOME_NEWS_LIMIT
     except Exception:
-        limit = 10
+        limit = _HOME_NEWS_LIMIT
     limit = max(1, min(20, limit))
     region = normalize_news_region_param(request.args.get("region"))
     try:

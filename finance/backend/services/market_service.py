@@ -2,9 +2,10 @@ import time
 import uuid
 import os
 import threading
-import requests
+import re
 from concurrent.futures import ThreadPoolExecutor
-from utils.helpers import _now_str, _parse_symbol, _is_a_share_6digit, _to_float
+import requests
+from utils.helpers import _now_str, _parse_symbol, _is_a_share_6digit, _to_float, _parse_sina_var
 from services.stock_service import _fetch_a_share_quote, _get_stock_daily_bars, _fetch_hot_node
 from services.news_service import _fetch_news_live, fetch_akshare_stock_news
 from services.llm_service import _invoke_llm_for_insight, _llm_repair_insight_json, _openai_compat_chat, _get_llm_env
@@ -28,7 +29,26 @@ DEFAULT_CHAT_FOLLOWUPS = [
     "现在最该盯的两个风险变量是什么？",
     "给我一个更稳健的观察/应对思路。",
 ]
-OUNCE_TO_GRAM = 31.1035
+
+_SINA_HQ = requests.Session()
+_SINA_HQ.headers.update(
+    {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://finance.sina.com.cn",
+    }
+)
+
+# Stooq 不需要新浪 Referer；部分网络环境带 Referer 反而更容易被拦/返回空
+_STOOQ = requests.Session()
+_STOOQ.headers.update(
+    {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/csv,text/plain,*/*",
+    }
+)
+
 
 def _env_flag(name: str, default: bool = True) -> bool:
     v = str(os.environ.get(name, "1" if default else "0") or "").strip().lower()
@@ -47,283 +67,823 @@ def _safe_followups(items, max_items: int = 3):
     return out
 
 
-def _fetch_yahoo_quote(symbol: str) -> dict | None:
-    s = str(symbol or "").strip()
-    if not s:
-        return None
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{s}"
-    try:
-        r = requests.get(url, timeout=8)
-        if r.status_code != 200:
-            return None
-        obj = r.json() if r.content else {}
-        chart = obj.get("chart") if isinstance(obj, dict) else {}
-        result = chart.get("result") if isinstance(chart, dict) else []
-        if not isinstance(result, list) or not result:
-            return None
-        meta = result[0].get("meta") if isinstance(result[0], dict) else {}
-        if not isinstance(meta, dict):
-            return None
-        px = meta.get("regularMarketPrice")
-        if px is None:
-            px = meta.get("previousClose")
-        if px is None:
-            return None
-        ts = meta.get("regularMarketTime") or 0
-        ccy = str(meta.get("currency") or "").strip()
-        return {"price": float(px), "currency": ccy, "ts": int(ts) if ts else 0}
-    except Exception:
-        return None
+def _detect_gold_market(question: str) -> str:
+    q = str(question or "").strip().lower()
+    if not q:
+        return ""
+    if not any(k in q for k in ("黄金", "金价", "国际金", "国内金", "xau", "伦敦金", "沪金", "au9999", "现货金")):
+        return ""
+    # 口径优先：国内关键词优先命中“国内金价”，否则默认“国际现货黄金”
+    cn_keys = ("国内", "国内金", "人民币", "沪金", "上金所", "au9999", "上海金", "黄金td")
+    intl_keys = ("现货", "伦敦", "国际", "国际金", "xau", "美元", "comex", "纽约金")
+    if any(k in q for k in cn_keys):
+        return "cn"
+    if any(k in q for k in intl_keys):
+        return "intl"
+    return "intl"
 
 
-def _fetch_usdcny_rate() -> tuple[float | None, str]:
-    """返回 (汇率, 来源)。优先实时，其次兜底。"""
-    y1 = _fetch_yahoo_quote("USDCNY=X")
-    if y1 and float(y1.get("price") or 0) > 0:
-        return float(y1.get("price")), "USDCNY=X"
-    y2 = _fetch_yahoo_quote("USDCNH=X")
-    if y2 and float(y2.get("price") or 0) > 0:
-        return float(y2.get("price")), "USDCNH=X"
-    # 新浪美元兑人民币即期（fx_susdcny）
-    try:
-        resp = requests.get(
-            "https://hq.sinajs.cn/list=fx_susdcny",
-            headers={"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"},
-            timeout=8,
-        )
-        if resp.status_code == 200:
-            resp.encoding = "gbk"
-            txt = str(resp.text or "")
-            if '"' in txt:
-                body = txt.split('"', 2)[1]
-                parts = [x.strip() for x in body.split(",") if str(x).strip()]
-                for p in parts:
-                    try:
-                        v = float(p)
-                        if 5.0 <= v <= 10.0:
-                            return v, "fx_susdcny"
-                    except Exception:
-                        continue
-    except Exception:
-        pass
-    return None, ""
-
-
-def _fetch_macro_price_answer(question: str) -> dict | None:
+def _is_price_question(question: str) -> bool:
     q = str(question or "").strip()
     if not q:
-        return None
-    ql = q.lower()
-    ask_price = any(k in q for k in ["多少钱", "多少点", "价格", "报价", "现价", "实时", "最新"]) or any(
-        k in ql for k in ["price", "quote", "realtime"]
-    )
-    # 用户可能直接回答“看国际现货金/沪金”，也应继续尝试报价
-    mention_gold = any(k in q for k in ["黄金", "金价", "伦敦金", "沪金", "现货金", "xauusd", "au主力", "au"])
-    mention_silver = any(k in q for k in ["白银", "银价", "伦敦银", "沪银", "现货银", "xagusd", "ag主力", "ag"])
-    mention_fx = any(k in q for k in ["汇率", "美元", "离岸", "在岸", "人民币", "usdcny", "usdcnh"])
-    mention_oil = any(k in q for k in ["原油", "油价", "布伦特", "wti"])
-    if not ask_price and not (mention_gold or mention_silver or mention_fx or mention_oil):
-        return None
+        return False
+    return any(k in q for k in ("多少", "几", "报价", "价格", "点位", "多少钱", "实时", "现在"))
 
-    want_cny = any(k in q for k in ["元", "人民币", "rmb", "cny"])
-    explicit_usd = any(k in ql for k in ["usd", "xauusd", "xagusd", "美元"])
 
-    # 优先匹配用户最常见提问：黄金/汇率/原油
-    if mention_gold:
-        hit = _fetch_yahoo_quote("GC=F")
-        if not hit:
-            # Yahoo 不稳定时，用新浪外盘黄金兜底
-            try:
-                resp = requests.get(
-                    "https://hq.sinajs.cn/list=hf_GC",
-                    headers={"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"},
-                    timeout=8,
-                )
-                if resp.status_code == 200:
-                    resp.encoding = "gbk"
-                    txt = str(resp.text or "")
-                    if '"' in txt:
-                        body = txt.split('"', 2)[1]
-                        for x in body.split(","):
-                            x = str(x or "").strip()
-                            try:
-                                v = float(x)
-                                if v > 0:
-                                    hit = {"price": v, "currency": "USD", "ts": int(time.time())}
-                                    break
-                            except Exception:
-                                continue
-            except Exception:
-                pass
-        if not hit:
-            return None
-        px = float(hit.get("price") or 0.0)
-        ts = int(hit.get("ts") or 0)
-        tm = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) if ts > 0 else "刚刚"
-        if want_cny or (ask_price and not explicit_usd):
-            usdcny, fx_src = _fetch_usdcny_rate()
-            if usdcny and usdcny > 0:
-                cny_px_oz = px * usdcny
-                cny_px_g = cny_px_oz / OUNCE_TO_GRAM
-                summary = (
-                    f"黄金当前约 {cny_px_g:.2f} 元/克（按国际期金主力 GC=F {px:.2f} USD/盎司、"
-                    f"USD/CNY≈{usdcny:.4f}（{fx_src}）换算，更新时间：{tm}）。\n"
-                    f"注：国际金价常用美元/盎司，国内常用人民币/克（1盎司≈{OUNCE_TO_GRAM}克）。"
-                )
-            else:
-                est = 7.20
-                cny_px_oz = px * est
-                cny_px_g = cny_px_oz / OUNCE_TO_GRAM
-                summary = (
-                    f"黄金当前约 {cny_px_g:.2f} 元/克（按国际期金主力 GC=F {px:.2f} USD/盎司、"
-                    f"估算汇率 USD/CNY≈{est:.2f} 换算，更新时间：{tm}）。\n"
-                    f"注：实时汇率源短时不可用，以上为近似换算值；1盎司≈{OUNCE_TO_GRAM}克。"
-                )
-        else:
-            summary = (
-                f"黄金（国际期金主力，GC=F）当前约 {px:.2f} {hit.get('currency') or 'USD'}（更新时间：{tm}）。\n"
-                "若你要看“现货金 XAUUSD”或“沪金主力（人民币）”，我可以按对应口径继续给你。"
-            )
-        return {
-            "summary": summary,
-            "followUps": ["查看现货金 XAUUSD", "查看沪金 AU（人民币/克）"],
-            "session_id": uuid.uuid4().hex,
-        }
-
-    if mention_silver:
-        hit = _fetch_yahoo_quote("SI=F")
-        if not hit:
-            # Yahoo 不稳定时，用新浪外盘白银兜底
-            try:
-                resp = requests.get(
-                    "https://hq.sinajs.cn/list=hf_SI",
-                    headers={"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"},
-                    timeout=8,
-                )
-                if resp.status_code == 200:
-                    resp.encoding = "gbk"
-                    txt = str(resp.text or "")
-                    if '"' in txt:
-                        body = txt.split('"', 2)[1]
-                        for x in body.split(","):
-                            x = str(x or "").strip()
-                            try:
-                                v = float(x)
-                                if v > 0:
-                                    hit = {"price": v, "currency": "USD", "ts": int(time.time())}
-                                    break
-                            except Exception:
-                                continue
-            except Exception:
-                pass
-        if not hit:
-            return None
-        px = float(hit.get("price") or 0.0)
-        ts = int(hit.get("ts") or 0)
-        tm = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) if ts > 0 else "刚刚"
-        if want_cny or (ask_price and not explicit_usd):
-            usdcny, fx_src = _fetch_usdcny_rate()
-            if usdcny and usdcny > 0:
-                cny_px_oz = px * usdcny
-                cny_px_g = cny_px_oz / OUNCE_TO_GRAM
-                summary = (
-                    f"白银当前约 {cny_px_g:.2f} 元/克（按国际期银主力 SI=F {px:.2f} USD/盎司、"
-                    f"USD/CNY≈{usdcny:.4f}（{fx_src}）换算，更新时间：{tm}）。\n"
-                    f"注：国际银价常用美元/盎司，国内常用人民币/克（1盎司≈{OUNCE_TO_GRAM}克）。"
-                )
-            else:
-                est = 7.20
-                cny_px_oz = px * est
-                cny_px_g = cny_px_oz / OUNCE_TO_GRAM
-                summary = (
-                    f"白银当前约 {cny_px_g:.2f} 元/克（按国际期银主力 SI=F {px:.2f} USD/盎司、"
-                    f"估算汇率 USD/CNY≈{est:.2f} 换算，更新时间：{tm}）。\n"
-                    f"注：实时汇率源短时不可用，以上为近似换算值；1盎司≈{OUNCE_TO_GRAM}克。"
-                )
-        else:
-            summary = (
-                f"白银（国际期银主力，SI=F）当前约 {px:.2f} {hit.get('currency') or 'USD'}（更新时间：{tm}）。\n"
-                "若你要看“现货银 XAGUSD”或“沪银主力（人民币）”，我可以按对应口径继续给你。"
-            )
-        return {
-            "summary": summary,
-            "followUps": ["查看现货银 XAGUSD", "查看沪银 AG（人民币/克）"],
-            "session_id": uuid.uuid4().hex,
-        }
-
-    if any(k in q for k in ["汇率", "美元", "离岸", "在岸", "人民币"]):
-        pair = "USDCNH=X" if ("离岸" in q or "CNH" in q.upper()) else "USDCNY=X"
-        hit = _fetch_yahoo_quote(pair)
-        if not hit:
-            return None
-        px = float(hit.get("price") or 0.0)
-        ts = int(hit.get("ts") or 0)
-        tm = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) if ts > 0 else "刚刚"
-        label = "美元兑离岸人民币" if pair == "USDCNH=X" else "美元兑在岸人民币"
-        summary = f"{label}（{pair}）当前约 {px:.4f}（更新时间：{tm}）。"
-        return {
-            "summary": summary,
-            "followUps": ["要看在岸/离岸价差吗？", "需要我按1个月维度看趋势吗？"],
-            "session_id": uuid.uuid4().hex,
-        }
-
-    if any(k in q for k in ["原油", "油价", "布伦特", "wti"]):
-        sym = "BZ=F" if ("布伦特" in q or "brent" in ql) else "CL=F"
-        hit = _fetch_yahoo_quote(sym)
-        if not hit:
-            return None
-        px = float(hit.get("price") or 0.0)
-        ts = int(hit.get("ts") or 0)
-        tm = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) if ts > 0 else "刚刚"
-        label = "布伦特原油主力" if sym == "BZ=F" else "WTI 原油主力"
-        summary = f"{label}（{sym}）当前约 {px:.2f} {hit.get('currency') or 'USD'}（更新时间：{tm}）。"
-        return {
-            "summary": summary,
-            "followUps": ["要看布伦特和WTI价差吗？", "要补库存/地缘因素对油价的影响吗？"],
-            "session_id": uuid.uuid4().hex,
-        }
-
+def _first_float(values, idxs):
+    for idx in idxs:
+        if idx < 0 or idx >= len(values):
+            continue
+        v = _to_float(values[idx], None)
+        if v is not None:
+            return float(v)
     return None
 
 
-def _fetch_cn_index_answer(question: str) -> dict | None:
+def _fetch_sina_hq_line(symbol: str) -> list[str]:
+    try:
+        url = f"https://hq.sinajs.cn/list={symbol}"
+        resp = _SINA_HQ.get(url, timeout=8)
+        resp.encoding = "gbk"
+        return _parse_sina_var(resp.text)
+    except Exception:
+        return []
+
+
+def _extract_dt_from_fields(fields: list[str]) -> str:
+    date_s = ""
+    time_s = ""
+    for raw in fields:
+        s = str(raw or "").strip()
+        if not date_s and re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+            date_s = s
+        if not time_s and re.fullmatch(r"\d{2}:\d{2}(:\d{2})?", s):
+            time_s = s
+        if date_s and time_s:
+            break
+    return f"{date_s} {time_s}".strip()
+
+
+def _fetch_gold_live_quote(question: str) -> dict | None:
+    market = _detect_gold_market(question)
+    if not market:
+        return None
+
+    ql = str(question or "").strip().lower()
+    want_comex = ("comex" in ql) or ("gc" in ql) or ("纽约金" in ql)
+    # 新浪公开行情：
+    # - 若用户明确问 COMEX：优先 hf_GC（期货主连）
+    # - 否则：优先 hf_XAU（更接近现货口径），再用 hf_GC 兜底
+    # - 国内：沪金连续 nf_AU0
+    if market == "intl":
+        candidates = ["hf_GC", "hf_XAU"] if want_comex else ["hf_XAU", "hf_GC"]
+    else:
+        candidates = ["nf_AU0"]
+    unit = "美元/盎司" if market == "intl" else "元/克"
+    market_name = ("COMEX黄金期货" if want_comex else "国际现货黄金") if market == "intl" else "国内沪金连续"
+
+    for sym in candidates:
+        fields = _fetch_sina_hq_line(sym)
+        if not fields:
+            continue
+        if sym.startswith("hf_"):
+            # 示例：hf_XAU => [最新, 买, 卖, 今开, 最高, 最低, 时间, 昨结, ... , 日期, 名称]
+            price = _first_float(fields, [0, 3, 1])
+            prev_close = _first_float(fields, [7, 1])
+            if not price or price <= 0:
+                continue
+            pct = ((price - prev_close) / prev_close * 100.0) if prev_close and prev_close > 0 else None
+            update_time = _extract_dt_from_fields(fields) or _now_str()
+            name = str(fields[-1] or "").strip() if fields else market_name
+            return {
+                "market": market,
+                "market_name": market_name,
+                "symbol": sym,
+                "name": name or market_name,
+                "price": round(float(price), 3),
+                "pct_chg": round(float(pct), 3) if pct is not None else None,
+                "unit": unit,
+                "update_time": update_time,
+                "source": "sina-hq",
+            }
+        if sym.startswith("nf_"):
+            # 示例：nf_AU0 => [名称, ..., 今开, 最高, 最低, 最新/现价附近字段..., 日期, ...]
+            price = _first_float(fields, [8, 6, 5, 2])
+            prev_close = _first_float(fields, [6, 7, 2])
+            if not price or price <= 0:
+                continue
+            pct = ((price - prev_close) / prev_close * 100.0) if prev_close and prev_close > 0 else None
+            update_time = _extract_dt_from_fields(fields) or _now_str()
+            name = str(fields[0] or "").strip() if fields else market_name
+            return {
+                "market": market,
+                "market_name": market_name,
+                "symbol": sym,
+                "name": name or market_name,
+                "price": round(float(price), 3),
+                "pct_chg": round(float(pct), 3) if pct is not None else None,
+                "unit": unit,
+                "update_time": update_time,
+                "source": "sina-hq",
+            }
+    return None
+
+
+def _build_gold_quote_summary(quote: dict) -> str:
+    pct = quote.get("pct_chg")
+    pct_txt = f"{float(pct):+.3f}%" if pct is not None else "暂无涨跌幅"
+    return (
+        f"{quote.get('market_name')}（{quote.get('symbol')}）最新约 {quote.get('price')} {quote.get('unit')}，"
+        f"涨跌幅 {pct_txt}。"
+        f"数据源：新浪公开行情（{quote.get('source')}），时间：{quote.get('update_time')}。"
+    )
+
+
+_INDEX_SYMBOLS = [
+    ("沪深300", "sh000300"),
+    ("上证指数", "sh000001"),
+    ("深证成指", "sz399001"),
+    ("创业板指", "sz399006"),
+    ("中证500", "sh000905"),
+    ("中证1000", "sh000852"),
+    ("中小100", "sz399005"),
+    ("国证2000", "sz399303"),
+]
+
+
+def _detect_index_symbol(question: str) -> tuple[str, str] | None:
+    q = str(question or "").strip().lower()
+    if not q:
+        return None
+    alias = {
+        "沪深300": ("沪深300", "sh000300"),
+        "hs300": ("沪深300", "sh000300"),
+        "000300": ("沪深300", "sh000300"),
+        "上证": ("上证指数", "sh000001"),
+        "上证指数": ("上证指数", "sh000001"),
+        "上证综指": ("上证指数", "sh000001"),
+        "深指": ("深证成指", "sz399001"),
+        "深证": ("深证成指", "sz399001"),
+        "深证成指": ("深证成指", "sz399001"),
+        "创业板": ("创业板指", "sz399006"),
+        "创业板指": ("创业板指", "sz399006"),
+        "中证500": ("中证500", "sh000905"),
+        "000905": ("中证500", "sh000905"),
+        "中证1000": ("中证1000", "sh000852"),
+        "000852": ("中证1000", "sh000852"),
+    }
+    for k, v in alias.items():
+        if k in q:
+            return v
+    return None
+
+
+def _fetch_index_live_quote(question: str) -> dict | None:
+    hit = _detect_index_symbol(question)
+    if not hit:
+        return None
+    market_name, sym = hit
+    fields = _fetch_sina_hq_line(sym)
+    if not fields:
+        return None
+    price = _first_float(fields, [3, 1, 0])
+    open_p = _first_float(fields, [1])
+    prev_close = _first_float(fields, [2])
+    high = _first_float(fields, [4])
+    low = _first_float(fields, [5])
+    if not price or price <= 0:
+        return None
+    pct = ((price - prev_close) / prev_close * 100.0) if prev_close and prev_close > 0 else None
+    update_time = _extract_dt_from_fields(fields) or _now_str()
+    name = str(fields[0] or "").strip() if fields else market_name
+    return {
+        "market": "cn_index",
+        "market_name": market_name,
+        "symbol": sym,
+        "name": name or market_name,
+        "price": round(float(price), 3),
+        "pct_chg": round(float(pct), 3) if pct is not None else None,
+        "open": round(float(open_p), 3) if open_p is not None else None,
+        "high": round(float(high), 3) if high is not None else None,
+        "low": round(float(low), 3) if low is not None else None,
+        "unit": "点",
+        "update_time": update_time,
+        "source": "sina-hq",
+    }
+
+
+def _build_live_quote_summary(quote: dict) -> str:
+    pct = quote.get("pct_chg")
+    pct_txt = f"{float(pct):+.3f}%" if pct is not None else "暂无涨跌幅"
+    unit = str(quote.get("unit") or "").strip()
+    unit_txt = f" {unit}" if unit else ""
+    return (
+        f"{quote.get('market_name')}（{quote.get('symbol')}）最新约 {quote.get('price')}{unit_txt}，"
+        f"涨跌幅 {pct_txt}。"
+        f"数据源：新浪公开行情（{quote.get('source')}），时间：{quote.get('update_time')}。"
+    )
+
+
+def _llm_enrich_live_quote(quote: dict, question: str, chat_history: list, llm_ready: bool) -> str:
+    base = _build_live_quote_summary(quote)
+    if not llm_ready:
+        return base
+    # 防止“看似合理但数字错误”的情况：若 LLM 输出中出现任何非 live_quote 的数字，直接回退 base
+    def _allowed_number_tokens(q: dict) -> set[str]:
+        out: set[str] = set()
+        for k in ("price", "pct_chg"):
+            v = q.get(k)
+            if v is None:
+                continue
+            try:
+                fv = float(v)
+            except Exception:
+                continue
+            # 常见格式：原样/两位/三位/四位、带符号百分比
+            out.add(str(v))
+            out.add(f"{fv:.4f}".rstrip("0").rstrip("."))
+            out.add(f"{fv:.3f}".rstrip("0").rstrip("."))
+            out.add(f"{fv:.2f}".rstrip("0").rstrip("."))
+            out.add(f"{fv:.1f}".rstrip("0").rstrip("."))
+            out.add(f"{fv:.0f}")
+            out.add(f"{fv:+.4f}".rstrip("0").rstrip("."))
+            out.add(f"{fv:+.3f}".rstrip("0").rstrip("."))
+            out.add(f"{fv:+.2f}".rstrip("0").rstrip("."))
+            out.add(f"{fv:+.1f}".rstrip("0").rstrip("."))
+            out.add(f"{fv:+.0f}")
+        # 时间戳允许出现日期/时间数字（不做数值校验）
+        return {x for x in out if x}
+
+    allowed = _allowed_number_tokens(quote)
+    try:
+        payload = {
+            "question": str(question or "").strip(),
+            "chat_history": chat_history or [],
+            "live_quote": {
+                "market_name": quote.get("market_name"),
+                "symbol": quote.get("symbol"),
+                "price": quote.get("price"),
+                "pct_chg": quote.get("pct_chg"),
+                "unit": quote.get("unit"),
+                "update_time": quote.get("update_time"),
+                "source": quote.get("source"),
+            },
+        }
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是金融研究助理。必须把 live_quote 当作唯一可信数字来源。"
+                    "你只能做补充解读，禁止改写价格、涨跌幅、时间、单位。"
+                    "若需要复述数字，必须与 live_quote 完全一致。"
+                    "严格要求：除 live_quote.price 与 live_quote.pct_chg 外，summary 中禁止出现其它任何数字（包括区间、目标位、历史高低、换算、推算）。"
+                    "输出 JSON：summary(字符串) + followUps(2-3条字符串数组)。禁止 Markdown。"
+                ),
+            },
+            {"role": "user", "content": str(payload)},
+        ]
+        content = _openai_compat_chat(messages, max_tokens=240, temperature=0.2)
+        obj = _extract_json_object(content) or {}
+        s = str(obj.get("summary") or "").strip()
+        if s:
+            # 数字一致性校验：如果出现任何“看起来像数字”的片段且不在 allowed 集合里，回退
+            tokens = re.findall(r"(?<!\d)(?:\d+\.\d+|\d+)(?!\d)", s)
+            bad = []
+            for t in tokens:
+                # 过滤日期时间（YYYY-MM-DD / HH:MM:SS）中的数字片段：允许出现
+                if "-" in s or ":" in s:
+                    # 粗过滤：如果该 token 周围 2 个字符内包含 '-' 或 ':'，认为是时间日期的一部分
+                    idx = s.find(t)
+                    if idx != -1:
+                        ctx = s[max(0, idx - 2) : min(len(s), idx + len(t) + 2)]
+                        if ("-" in ctx) or (":" in ctx):
+                            continue
+                if t not in allowed:
+                    bad.append(t)
+            if bad:
+                return base
+            return s
+    except Exception:
+        pass
+    return base
+
+
+def _llm_enrich_history_summary(quote: dict, question: str, verified_summary: str, chat_history: list, llm_ready: bool) -> str:
+    if not llm_ready:
+        return verified_summary
+    try:
+        payload = {
+            "question": str(question or "").strip(),
+            "chat_history": chat_history or [],
+            "verified_summary": str(verified_summary or "").strip(),
+            "live_quote": {
+                "market_name": quote.get("market_name"),
+                "symbol": quote.get("symbol"),
+                "price": quote.get("price"),
+                "pct_chg": quote.get("pct_chg"),
+                "unit": quote.get("unit"),
+                "update_time": quote.get("update_time"),
+                "source": quote.get("source"),
+            },
+        }
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是金融研究助理。必须基于 verified_summary 与 live_quote 回答。"
+                    "可以做趋势解读，但禁止新增任何未在 verified_summary/live_quote 出现的数字。"
+                    "输出 JSON：summary(字符串) + followUps(2-3条字符串数组)。禁止 Markdown。"
+                ),
+            },
+            {"role": "user", "content": str(payload)},
+        ]
+        content = _openai_compat_chat(messages, max_tokens=320, temperature=0.2)
+        obj = _extract_json_object(content) or {}
+        s = str(obj.get("summary") or "").strip()
+        if not s:
+            return verified_summary
+        # 数字护栏：LLM 输出中的数字必须来自 verified_summary 或 live_quote 两者
+        allowed_src = f"{verified_summary} {_build_live_quote_summary(quote)}"
+        allowed_nums = set(re.findall(r"(?<!\d)(?:\d+\.\d+|\d+)(?!\d)", allowed_src))
+        out_nums = re.findall(r"(?<!\d)(?:\d+\.\d+|\d+)(?!\d)", s)
+        for n in out_nums:
+            if n not in allowed_nums:
+                return verified_summary
+        return s
+    except Exception:
+        return verified_summary
+
+
+def _is_history_scope_question(question: str) -> bool:
+    q = str(question or "").strip()
+    if not q:
+        return False
+    keys = (
+        "历史",
+        "最高",
+        "最低",
+        "趋势",
+        "走势",
+        "区间",
+        "最近一周",
+        "近一周",
+        "近1月",
+        "近一个月",
+        "近一月",
+        "近10日",
+        "近20日",
+        "过去",
+        "此前",
+        "之前",
+        "去年",
+        "今年以来",
+        "近半年",
+        "近一年",
+    )
+    return any(k in q for k in keys)
+
+
+def _build_history_scope_guard(quote: dict) -> str:
+    return (
+        f"{_build_live_quote_summary(quote)}"
+        "你问的是历史/区间口径（如最高位、近1个月涨幅）。"
+        "当前问答链路已接实时行情，但本次未能拉取到可用的历史序列数据（可能是数据源超时/被拦/暂不可用）；"
+        "为避免误导，我先不给未经验证的历史数字。"
+    )
+
+
+def _fetch_stooq_daily_series(symbol: str, max_rows: int = 500) -> tuple[list[str], list[float]]:
+    try:
+        r = _STOOQ.get(
+            "https://stooq.com/q/d/l/",
+            params={"s": str(symbol or "").strip().lower(), "i": "d"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        lines = [x.strip() for x in str(r.text or "").splitlines() if x.strip()]
+        if len(lines) < 2:
+            return [], []
+        head = [h.strip().lower() for h in lines[0].split(",")]
+        try:
+            i_date = head.index("date")
+            i_close = head.index("close")
+        except ValueError:
+            return [], []
+        dates: list[str] = []
+        closes: list[float] = []
+        for ln in lines[1: max_rows + 1]:
+            parts = [x.strip() for x in ln.split(",")]
+            if len(parts) <= max(i_date, i_close):
+                continue
+            c = _to_float(parts[i_close], None)
+            if c is None:
+                continue
+            dates.append(parts[i_date])
+            closes.append(float(c))
+        return dates, closes
+    except Exception:
+        return [], []
+
+
+def _pick_window_days_by_question(question: str, series_len: int) -> tuple[int, str]:
+    qn = str(question or "")
+    n = max(2, int(series_len or 2))
+    m = re.search(r"近\s*(\d+)\s*(日|天|周|个月|月|年)", qn)
+    if m:
+        num = max(1, int(m.group(1)))
+        unit = m.group(2)
+        if unit in ("日", "天"):
+            return min(n - 1, max(1, num)), f"近{num}日"
+        if unit == "周":
+            return min(n - 1, max(1, num * 5)), f"近{num}周"
+        if unit in ("个月", "月"):
+            return min(n - 1, max(1, num * 22)), f"近{num}个月"
+        if unit == "年":
+            return min(n - 1, max(1, num * 250)), f"近{num}年"
+    table = [
+        (("近一周", "这周", "最近一周"), 5, "近1周"),
+        (("近两周", "最近两周"), 10, "近2周"),
+        (("近10日", "近十日", "最近10天"), 10, "近10日"),
+        (("近20日", "近二十日"), 20, "近20日"),
+        (("近1月", "近一个月", "近一月", "一个月", "1个月"), 22, "近1个月"),
+        (("近3月", "近三个月", "近季度"), 66, "近3个月"),
+        (("近半年", "半年"), 120, "近半年"),
+        (("近1年", "近一年", "一年", "今年以来"), 250, "近1年"),
+        (("近2年", "近两年"), 500, "近2年"),
+    ]
+    for keys, days, label in table:
+        if any(k in qn for k in keys):
+            return min(n - 1, max(1, days)), label
+    return min(n - 1, 22), "近1个月"
+
+
+def _verified_history_summary(question: str, quote: dict) -> str:
+    sym = str(quote.get("symbol") or "").strip().lower()
+    q = str(question or "").strip()
+    dates: list[str] = []
+    closes: list[float] = []
+
+    # A 股：直接用现有个股历史接口（已在项目内稳定使用）
+    digits = "".join(ch for ch in sym if ch.isdigit())
+    if len(digits) >= 6 and digits[-6:].isdigit():
+        code6 = digits[-6:]
+        try:
+            daily = _get_stock_daily_bars(code6) or {}
+        except Exception:
+            daily = {}
+        d = daily.get("dates") or []
+        c = daily.get("closes") or []
+        if isinstance(d, list) and isinstance(c, list) and len(d) == len(c) and len(c) >= 2:
+            dates = [str(x) for x in d]
+            closes = [float(_to_float(x, 0.0) or 0.0) for x in c]
+
+    # 商品：用 Stooq 日线做历史区间统计
+    if not closes:
+        stooq_map = {"hf_xau": "xauusd", "hf_si": "xagusd", "hf_cl": "cl.f"}
+        if sym in stooq_map:
+            dates, closes = _fetch_stooq_daily_series(stooq_map[sym], max_rows=520)
+
+    if not closes or len(closes) < 2:
+        return ""
+
+    pairs = [(d, c) for d, c in zip(dates, closes) if c > 0]
+    if len(pairs) < 2:
+        return ""
+    dates = [x[0] for x in pairs]
+    closes = [x[1] for x in pairs]
+
+    last_p = closes[-1]
+    last_d = dates[-1]
+    window, window_label = _pick_window_days_by_question(q, len(closes))
+    base_p = closes[-1 - window]
+    win_pct = ((last_p - base_p) / base_p * 100.0) if base_p > 0 else None
+
+    win_slice = closes[-(window + 1):]
+    win_dates = dates[-(window + 1):]
+    w_max_i = max(range(len(win_slice)), key=lambda i: win_slice[i])
+    w_min_i = min(range(len(win_slice)), key=lambda i: win_slice[i])
+    w_max_p, w_max_d = win_slice[w_max_i], win_dates[w_max_i]
+    w_min_p, w_min_d = win_slice[w_min_i], win_dates[w_min_i]
+    max_i = max(range(len(closes)), key=lambda i: closes[i])
+    min_i = min(range(len(closes)), key=lambda i: closes[i])
+    max_p, max_d = closes[max_i], dates[max_i]
+    min_p, min_d = closes[min_i], dates[min_i]
+
+    unit = str(quote.get("unit") or "").strip()
+    unit_txt = f" {unit}" if unit else ""
+    mkt = str(quote.get("market_name") or quote.get("name") or sym)
+
+    if any(k in q for k in ("最高", "高点", "最高位")):
+        return f"{mkt}可验证历史样本最高收盘约为 {max_p:.4f}{unit_txt}（{max_d}），当前最新约 {last_p:.4f}{unit_txt}（{last_d}）。"
+    if any(k in q for k in ("最低", "低点", "最低位")):
+        return f"{mkt}可验证历史样本最低收盘约为 {min_p:.4f}{unit_txt}（{min_d}），当前最新约 {last_p:.4f}{unit_txt}（{last_d}）。"
+    if win_pct is not None:
+        return f"{mkt}{window_label}（约{window}个交易日）收盘累计约 {win_pct:+.2f}%，区间最高收盘 {w_max_p:.4f}{unit_txt}（{w_max_d}），最低收盘 {w_min_p:.4f}{unit_txt}（{w_min_d}）。"
+    return f"{mkt}当前最新约 {last_p:.4f}{unit_txt}（{last_d}），{window_label}区间最高收盘 {w_max_p:.4f}{unit_txt}（{w_max_d}），最低收盘 {w_min_p:.4f}{unit_txt}（{w_min_d}）。"
+
+
+def _normalize_query_text(text: str) -> str:
+    q = str(text or "").strip().lower()
+    if not q:
+        return ""
+    # 轻量归一化：去语气词/空白，避免“国际金呢”“今天的沪深300行情怎么样”这类漏识别
+    q = re.sub(r"\s+", "", q)
+    for w in ("呢", "啊", "呀", "吧", "吗", "么", "请问", "帮我", "看看", "一下", "今天", "今日", "现在", "目前", "行情", "报价", "价格", "多少", "几点", "点位"):
+        q = q.replace(w, "")
+    return q
+
+
+def _keyword_hit(q_norm: str, key: str) -> bool:
+    k = str(key or "").strip().lower()
+    if not k:
+        return False
+    if k in q_norm:
+        return True
+    # “黄金/国际金/现货金”这类写法做统一兜底，减少手写别名
+    if "金" in k and (("国际" in k and ("国际金" in q_norm or "国际黄金" in q_norm)) or ("国内" in k and ("国内金" in q_norm or "国内黄金" in q_norm))):
+        return True
+    return False
+
+
+_QUOTE_KEYWORD_LIBRARY = [
+    {"keys": ("沪深300", "hs300"), "symbol": "sh000300", "name": "沪深300", "unit": "点"},
+    {"keys": ("上证指数", "上证综指", "上证"), "symbol": "sh000001", "name": "上证指数", "unit": "点"},
+    {"keys": ("深证成指", "深指", "深证"), "symbol": "sz399001", "name": "深证成指", "unit": "点"},
+    {"keys": ("创业板指", "创业板"), "symbol": "sz399006", "name": "创业板指", "unit": "点"},
+    {"keys": ("中证500",), "symbol": "sh000905", "name": "中证500", "unit": "点"},
+    {"keys": ("中证1000",), "symbol": "sh000852", "name": "中证1000", "unit": "点"},
+    {"keys": ("道琼斯", "道指"), "symbol": "gb_dji", "name": "道琼斯指数", "unit": "点"},
+    {"keys": ("纳斯达克", "纳指"), "symbol": "gb_ixic", "name": "纳斯达克指数", "unit": "点"},
+    {"keys": ("标普500", "标普"), "symbol": "gb_inx", "name": "标普500", "unit": "点"},
+    {"keys": ("comex黄金", "comex金", "gc黄金", "纽约金"), "symbol": "hf_GC", "name": "COMEX黄金期货", "unit": "美元/盎司"},
+    {"keys": ("现货黄金", "伦敦金", "伦敦现货金", "国际黄金", "国际金", "xau"), "symbol": "hf_XAU", "name": "国际现货黄金", "unit": "美元/盎司"},
+    {"keys": ("国内黄金", "国内金", "沪金", "au9999"), "symbol": "nf_AU0", "name": "国内沪金连续", "unit": "元/克"},
+    {"keys": ("现货白银", "白银", "xag"), "symbol": "hf_SI", "name": "国际白银", "unit": "美元/盎司"},
+    {"keys": ("原油", "wti", "美油"), "symbol": "hf_CL", "name": "WTI原油", "unit": "美元/桶"},
+    {"keys": ("美元人民币", "usdcny", "汇率"), "symbol": "USDCNY", "name": "美元兑人民币", "unit": ""},
+]
+
+
+def _normalize_symbol_candidates(raw_symbol: str) -> list[str]:
+    s_raw = str(raw_symbol or "").strip().strip('"').strip("'").strip()
+    if not s_raw:
+        return []
+    s_lower = s_raw.lower()
+    candidates = [s_raw, s_lower]
+    if s_lower.startswith("hf_") and len(s_lower) > 3:
+        suffix = s_raw[3:] if s_raw.lower().startswith("hf_") else s_lower[3:]
+        if suffix:
+            candidates.insert(0, f"hf_{suffix.upper()}")
+    if s_lower.startswith("nf_") and len(s_lower) > 3:
+        suffix = s_raw[3:] if s_raw.lower().startswith("nf_") else s_lower[3:]
+        if suffix:
+            candidates.insert(0, f"nf_{suffix.upper()}")
+    if len(s_lower) == 6 and s_lower.isdigit():
+        if s_lower.startswith("92"):
+            candidates.insert(0, f"bj{s_lower}")
+        elif s_lower.startswith(("6", "9")):
+            candidates.insert(0, f"sh{s_lower}")
+        elif s_lower.startswith(("0", "2", "3")):
+            candidates.insert(0, f"sz{s_lower}")
+        elif s_lower.startswith(("4", "8")):
+            candidates.insert(0, f"bj{s_lower}")
+    if len(s_lower) == 5 and s_lower.isdigit():
+        candidates.insert(0, f"hk{s_lower}")
+    if s_lower.isalpha() and 1 <= len(s_lower) <= 12 and not s_lower.startswith(("sh", "sz", "bj", "hk", "gb", "hf", "nf")):
+        candidates.insert(0, f"gb_{s_lower}")
+    seen = set()
+    out = []
+    for c in candidates:
+        if c and c not in seen:
+            out.append(c)
+            seen.add(c)
+    return out
+
+
+def _parse_sina_realtime_quote(symbol: str, fields: list[str]) -> dict | None:
+    if not fields:
+        return None
+    sym = str(symbol or "").strip().lower()
+    now = _now_str()
+    update_time = _extract_dt_from_fields(fields) or now
+    if sym.startswith("gb_"):
+        name = str(fields[0] or symbol).strip()
+        price = _first_float(fields, [1, 0])
+        open_p = _first_float(fields, [5])
+        high = _first_float(fields, [6])
+        low = _first_float(fields, [7])
+        chg = _first_float(fields, [2])
+        prev_close = (float(price) - float(chg)) if (price is not None and chg is not None) else None
+    elif sym.startswith("hk"):
+        name = str((fields[1] if len(fields) > 1 and fields[1] else fields[0]) or symbol).strip()
+        open_p = _first_float(fields, [2])
+        price = _first_float(fields, [3, 6, 2])
+        high = _first_float(fields, [4])
+        low = _first_float(fields, [5])
+        prev_close = _first_float(fields, [9, 3, 2])
+    elif sym.startswith("hf_") or sym.startswith("nf_"):
+        name = str((fields[-1] if sym.startswith("hf_") else fields[0]) or symbol).strip()
+        price = _first_float(fields, [0, 8, 6, 5, 2, 1])
+        open_p = _first_float(fields, [3, 2])
+        high = _first_float(fields, [4, 3])
+        low = _first_float(fields, [5, 4])
+        prev_close = _first_float(fields, [7, 2, 1])
+    else:
+        name = str(fields[0] or symbol).strip()
+        open_p = _first_float(fields, [1])
+        prev_close = _first_float(fields, [2])
+        price = _first_float(fields, [3, 2, 1])
+        high = _first_float(fields, [4])
+        low = _first_float(fields, [5])
+    if price is None:
+        return None
+    if (price <= 0) and (prev_close is not None and prev_close > 0):
+        price = float(prev_close)
+    if price <= 0:
+        return None
+    chg = float(price) - float(prev_close) if (prev_close is not None and prev_close > 0) else None
+    pct = (chg / float(prev_close) * 100.0) if (chg is not None and prev_close and prev_close > 0) else None
+    return {
+        "symbol": symbol,
+        "name": name or symbol,
+        "price": round(float(price), 4),
+        "open": round(float(open_p), 4) if open_p is not None else None,
+        "high": round(float(high), 4) if high is not None else None,
+        "low": round(float(low), 4) if low is not None else None,
+        "pct_chg": round(float(pct), 3) if pct is not None else None,
+        "update_time": update_time,
+        "source": "sina-hq",
+    }
+
+
+def _extract_quote_target(question: str) -> dict | None:
     q = str(question or "").strip()
     if not q:
         return None
     ql = q.lower()
-    mapping = [
-        (["创业板指", "创业板指数", "399006"], "399006.SZ", "创业板指"),
-        (["沪深300", "hs300", "000300"], "000300.SS", "沪深300"),
-        (["上证指数", "上证综指", "上证", "000001"], "000001.SS", "上证指数"),
-        (["深证成指", "深成指", "399001"], "399001.SZ", "深证成指"),
-        (["中证500", "000905"], "000905.SS", "中证500"),
-        (["科创50", "000688"], "000688.SS", "科创50"),
-    ]
-    picked = None
-    for keys, y_symbol, cname in mapping:
-        if any(k.lower() in ql for k in keys):
-            picked = (y_symbol, cname)
-            break
-    if not picked:
-        if "指数" in q or "大盘" in q:
-            picked = ("000300.SS", "沪深300")
-        else:
-            return None
+    qn = _normalize_query_text(q)
+    m = re.search(r"\b((?:sh|sz|bj)\d{6}|hk\d{5}|(?:hf|nf)_[a-z0-9]+|gb_[a-z0-9]+|usdcny)\b", ql)
+    if m:
+        sym = m.group(1)
+        return {"symbol": sym, "name": sym.upper(), "unit": ""}
+    m6 = re.search(r"\b(\d{6})\b", q)
+    if m6:
+        return {"symbol": m6.group(1), "name": m6.group(1), "unit": ""}
+    for item in _QUOTE_KEYWORD_LIBRARY:
+        if any(_keyword_hit(qn, k) for k in item["keys"]):
+            return {"symbol": item["symbol"], "name": item["name"], "unit": item["unit"]}
+    return None
 
-    y_symbol, cname = picked
-    hit = _fetch_yahoo_quote(y_symbol)
-    if not hit:
+
+def _build_quote_context_text(question: str, history: list[dict] | None) -> str:
+    q = str(question or "").strip()
+    if not isinstance(history, list) or not history:
+        return q
+    recent = []
+    for row in history[-6:]:
+        if not isinstance(row, dict):
+            continue
+        # 只用用户输入做上下文承接，避免把助手回答里的股票代码/数字当成新的标的
+        if str(row.get("role") or "").strip().lower() != "user":
+            continue
+        txt = str(row.get("text") or "").strip()
+        if txt:
+            recent.append(txt[:120])
+    if not recent:
+        return q
+    # 当前问题放最前，后接最近上下文，便于“那国际金呢/那这个最高呢”这类追问承接标的
+    return f"{q} | {' | '.join(recent)}"
+
+
+def _fetch_realtime_quote_by_question(question: str, history: list[dict] | None = None) -> tuple[dict | None, bool]:
+    target = _extract_quote_target(question)
+    if not target:
+        target = _extract_quote_target(_build_quote_context_text(question, history))
+    if not target:
+        return None, False
+    candidates = _normalize_symbol_candidates(str(target.get("symbol") or ""))
+    for sym in candidates:
+        fields = _fetch_sina_hq_line(sym)
+        quote = _parse_sina_realtime_quote(sym, fields)
+        if not quote:
+            continue
+        quote["market_name"] = str(target.get("name") or quote.get("name") or sym)
+        quote["unit"] = str(target.get("unit") or "")
+        return quote, True
+    # 多源兜底：新浪不可用时，按品种回退到 Stooq / AkShare
+    fb = _fetch_realtime_quote_fallback(
+        symbol=str(target.get("symbol") or ""),
+        market_name=str(target.get("name") or ""),
+        unit=str(target.get("unit") or ""),
+    )
+    if fb:
+        return fb, True
+    return None, True
+
+
+def _parse_stooq_ohlcv_csv(text: str) -> dict | None:
+    lines = [x.strip() for x in str(text or "").splitlines() if x.strip()]
+    if not lines:
         return None
-    px = float(hit.get("price") or 0.0)
-    ts = int(hit.get("ts") or 0)
-    ccy = str(hit.get("currency") or "CNY").strip() or "CNY"
-    tm = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) if ts > 0 else "刚刚"
-    summary = f"{cname}当前约 {px:.2f} 点（{ccy}，更新时间：{tm}）。若你要，我可以继续给你短线/中线的指数节奏解读。"
+    if len(lines) >= 2 and "Close" in lines[0]:
+        cols = [x.strip() for x in lines[0].split(",")]
+        vals = [x.strip() for x in lines[1].split(",")]
+        row = dict(zip(cols, vals))
+        close = _to_float(row.get("Close"), None)
+        if close is None:
+            return None
+        return {
+            "date": str(row.get("Date") or "").strip(),
+            "time": str(row.get("Time") or "").strip(),
+            "open": _to_float(row.get("Open"), None),
+            "high": _to_float(row.get("High"), None),
+            "low": _to_float(row.get("Low"), None),
+            "close": float(close),
+        }
+    parts = [x.strip() for x in lines[0].split(",")]
+    if len(parts) < 7:
+        return None
+    close = _to_float(parts[6], None)
+    if close is None:
+        return None
     return {
-        "summary": summary,
-        "followUps": [f"{cname}短线怎么看？", "再看上证和沪深300对比", "给我一个指数观察清单"],
-        "session_id": uuid.uuid4().hex,
+        "date": parts[1] or "",
+        "time": parts[2] or "",
+        "open": _to_float(parts[3], None),
+        "high": _to_float(parts[4], None),
+        "low": _to_float(parts[5], None),
+        "close": float(close),
     }
+
+
+def _fetch_stooq_ohlc(symbol: str) -> dict | None:
+    try:
+        r = _STOOQ.get(
+            "https://stooq.com/q/l/",
+            params={"s": str(symbol or "").strip().lower(), "f": "sd2t2ohlcv", "e": "csv"},
+            timeout=8,
+        )
+        r.raise_for_status()
+        return _parse_stooq_ohlcv_csv(r.text)
+    except Exception:
+        return None
+
+
+def _fetch_realtime_quote_fallback(symbol: str, market_name: str, unit: str) -> dict | None:
+    sym = str(symbol or "").strip().lower()
+    # 商品优先 Stooq（demo2 同类来源）
+    stooq_map = {
+        "hf_xau": ("xauusd", "美元/盎司"),
+        "hf_si": ("xagusd", "美元/盎司"),
+        "hf_cl": ("cl.f", "美元/桶"),
+    }
+    if sym in stooq_map:
+        stooq_symbol, default_unit = stooq_map[sym]
+        row = _fetch_stooq_ohlc(stooq_symbol)
+        if row and _to_float(row.get("close"), 0.0):
+            price = float(_to_float(row.get("close"), 0.0) or 0.0)
+            open_p = _to_float(row.get("open"), None)
+            pct = ((price - float(open_p)) / float(open_p) * 100.0) if (open_p is not None and float(open_p) > 0) else None
+            return {
+                "symbol": symbol,
+                "name": market_name or symbol,
+                "market_name": market_name or symbol,
+                "price": round(price, 4),
+                "open": round(float(open_p), 4) if open_p is not None else None,
+                "high": round(float(_to_float(row.get("high"), 0.0) or 0.0), 4) if row.get("high") is not None else None,
+                "low": round(float(_to_float(row.get("low"), 0.0) or 0.0), 4) if row.get("low") is not None else None,
+                "pct_chg": round(float(pct), 3) if pct is not None else None,
+                "update_time": f"{row.get('date', '')} {row.get('time', '')}".strip() or _now_str(),
+                "source": "stooq-csv",
+                "unit": unit or default_unit,
+            }
+
+    # A 股代码兜底：沿用已有 AkShare fallback（_fetch_a_share_quote 内部已多源）
+    if sym.isdigit() and len(sym) == 6:
+        try:
+            q = _fetch_a_share_quote(sym)
+        except Exception:
+            q = None
+        if q and _to_float(q.get("price"), 0.0):
+            prev_close = _to_float(q.get("prev_close"), None)
+            price = float(_to_float(q.get("price"), 0.0) or 0.0)
+            pct = _to_float(q.get("pct_chg"), None)
+            if pct is None and prev_close and prev_close > 0:
+                pct = (price - float(prev_close)) / float(prev_close) * 100.0
+            return {
+                "symbol": sym,
+                "name": str(q.get("name") or market_name or sym),
+                "market_name": market_name or str(q.get("name") or sym),
+                "price": round(price, 4),
+                "open": _to_float(q.get("open"), None),
+                "high": _to_float(q.get("high"), None),
+                "low": _to_float(q.get("low"), None),
+                "pct_chg": round(float(pct), 3) if pct is not None else None,
+                "update_time": str(q.get("update_time") or _now_str()),
+                "source": str(q.get("source") or "akshare-fallback"),
+                "unit": unit or "",
+            }
+    return None
 
 
 def _headlines_for_symbol(symbol: str, name: str, global_news: list, hot_rows: list) -> list[dict]:
@@ -627,295 +1187,9 @@ def research_analyze(symbol: str, question: str, chat_history=None):
                 continue
             history.append({"role": "assistant" if role == "ai" else role, "text": text[:260]})
 
-    # 对话状态承接：若本轮输入是“AI追问按钮文本”，回溯上一条真实用户问题拼接为上下文
-    raw_q = str(question or "").strip()
-    raw_q_norm = raw_q.replace("（", "(").replace("）", ")").replace(" ", "")
-    cycle_choice = None  # "short" | "mid"
-    if raw_q_norm in ("短线(1-5天)", "短线(1-5)", "短线", "按短线给我具体进出场"):
-        cycle_choice = "short"
-    elif raw_q_norm in ("中线(1-3个月)", "中线(1-3)", "中线", "按中线给我关键验证点", "按中线给我建仓/止损/目标"):
-        cycle_choice = "mid"
-
-    option_like = any(
-        k in raw_q
-        for k in [
-            "最大可承受回撤",
-            "短线交易还是中线持有",
-            "是否需要我分别给出短线和中线两套判断",
-            "你希望结论偏保守还是偏进攻",
-            "短线（1-5天）",
-            "中线（1-3个月）",
-            "短线(1-5天)",
-            "中线(1-3个月)",
-        ]
-    )
-    effective_q = raw_q
-    if option_like:
-        prev_user = ""
-        for h in reversed(history[:-1]):
-            if h.get("role") != "user":
-                continue
-            t = str(h.get("text") or "").strip()
-            if not t or t == raw_q:
-                continue
-            prev_user = t
-            break
-        if prev_user:
-            effective_q = f"{prev_user}；参数：{raw_q}"
-
-    # 若本轮是“周期选择按钮”，把意图显式改写为“请按该周期给可执行策略”，避免落回追问周期/复读行情
-    if cycle_choice == "short":
-        effective_q = "按短线（1-5天）给出可执行交易策略：结论前置，包含关键位、止损、仓位与触发条件。"
-    elif cycle_choice == "mid":
-        effective_q = "按中线（1-3个月）给出可执行交易策略：结论前置，包含关键位、止损、仓位与验证点。"
-
-    # 通用问答优先尝试“可直接报价”能力（黄金/汇率/原油）
-    direct = _fetch_macro_price_answer(effective_q)
-    if isinstance(direct, dict) and str(direct.get("summary") or "").strip():
-        return direct
-
-    # 指数问答优先：命中指数时强制脱离个股绑定上下文
-    idx = _fetch_cn_index_answer(effective_q)
-    if isinstance(idx, dict) and str(idx.get("summary") or "").strip():
-        return idx
-
-    q_for_intent = str(effective_q or "").strip()
-    non_stock_intent = any(
-        k in q_for_intent
-        for k in [
-            "指数", "大盘", "创业板", "沪深300", "上证", "深成指", "中证500", "科创50",
-            "黄金", "白银", "原油", "汇率", "美元", "人民币", "xau", "xag", "wti", "brent",
-        ]
-    )
-    use_stock_context = _is_a_share_6digit(symbol) and not non_stock_intent
-
-    # -------------------------
-    # 【核心兜底】A股个股绑定优先（不依赖 LLM）
-    # 只要传入了 6 位 A 股代码，就必须优先用该标的的行情/分位/高低点回答，避免落到“通用黄金/通用框架”。
-    # -------------------------
-    if use_stock_context:
-        live = {}
-        daily = {}
-        try:
-            x = _fetch_a_share_quote(symbol)
-            if isinstance(x, dict):
-                live = x
-        except Exception:
-            live = {}
-        try:
-            x = _get_stock_daily_bars(symbol)
-            if isinstance(x, dict):
-                daily = x
-        except Exception:
-            daily = {}
-
-        name = str(live.get("name") or symbol).strip() or symbol
-        price = _to_float(live.get("price"), 0.0) or _to_float(daily.get("last_close"), 0.0) or 0.0
-        pct_chg = _to_float(live.get("pct_chg"), 0.0) or 0.0
-        percentile = _to_float(daily.get("percentile"), 0.0) or 0.0
-        o = live.get("open")
-        hi = live.get("high")
-        lo = live.get("low")
-        closes = daily.get("closes") or []
-
-        def _pct(a, b):
-            try:
-                a = float(a)
-                b = float(b)
-                if b == 0:
-                    return 0.0
-                return (a - b) / b * 100.0
-            except Exception:
-                return 0.0
-
-        change_10 = _pct(closes[-1], closes[-11]) if isinstance(closes, list) and len(closes) >= 12 else 0.0
-        change_20 = _pct(closes[-1], closes[-21]) if isinstance(closes, list) and len(closes) >= 22 else 0.0
-
-        q = str(effective_q or "").strip()
-        q_low = q.lower()
-        ask_buy = any(
-            k in q
-            for k in [
-                "买不买",
-                "能不能买",
-                "建议买",
-                "要不要买",
-                "值不值得买",
-                "适合买",
-                "可以买",
-                "能买",
-                "能入",
-                "能上车",
-                "值得入手",
-            ]
-        )
-        ask_cycle_short = cycle_choice == "short" or any(k in q for k in ["短线", "1-5天", "1~5天", "1—5天"])
-        ask_cycle_mid = cycle_choice == "mid" or any(k in q for k in ["中线", "1-3个月", "1~3个月", "1—3个月"])
-        ask_trend = any(k in q for k in ["走势", "偏哪边", "偏强", "偏弱", "动量", "趋势", "更偏"]) or any(
-            k in q_low for k in ["trend", "momentum"]
-        )
-        ask_risk = any(k in q for k in ["回撤", "风控", "止损", "支撑", "压力", "仓位", "未持仓"])
-
-        base = f"{name}（{symbol}）现价约 {price:.2f} 元，涨跌幅 {pct_chg:+.2f}%，近1年价格分位 {percentile:.2f}%（{PERCENTILE_DEFINITION_CN}）。"
-        today = []
-        try:
-            if o is not None:
-                today.append(f"今开 {float(o):.2f}")
-        except Exception:
-            pass
-        try:
-            if hi is not None:
-                today.append(f"最高 {float(hi):.2f}")
-        except Exception:
-            pass
-        try:
-            if lo is not None:
-                today.append(f"最低 {float(lo):.2f}")
-        except Exception:
-            pass
-        today_line = ("今日 " + "，".join(today) + "。") if today else ""
-
-        # 周期选择：必须直接给对应周期策略（不复读行情、不再追问周期）
-        if cycle_choice in ("short", "mid") or ask_cycle_short or ask_cycle_mid:
-            sup = None
-            res = None
-            try:
-                if lo is not None:
-                    sup = float(lo)
-            except Exception:
-                sup = None
-            try:
-                if hi is not None:
-                    res = float(hi)
-            except Exception:
-                res = None
-            sup_s = f"{sup:.2f}" if isinstance(sup, (int, float)) else ""
-            res_s = f"{res:.2f}" if isinstance(res, (int, float)) else ""
-
-            # 简化版策略：用今日高低点作“触发位”，动量/涨跌作“追高风险提示”
-            if cycle_choice == "short" or ask_cycle_short:
-                bias = "偏强" if (pct_chg >= 0 and (change_10 >= 0 or change_20 >= 0)) else "偏弱/震荡"
-                chase = "不建议追高，优先等回踩确认" if pct_chg >= 7 else "可关注回踩/突破的触发条件"
-                summary = (
-                    f"✅【短线（1-5天）策略】结论：{bias}，{chase}。\n"
-                    f"关键位：支撑 {sup_s or '今日低点'}，压力 {res_s or '今日高点'}。\n"
-                    f"执行：回踩支撑附近企稳再试探；有效突破压力再顺势；跌破支撑严格止损/减仓。\n"
-                    f"仓位：短线波动大，单标的建议不超过总资金 20%。\n"
-                    f"参考数据：现价 {price:.2f} 元，涨跌幅 {pct_chg:+.2f}%，10/20日动量 {change_10:+.2f}% / {change_20:+.2f}%。"
-                )
-                return {
-                    "summary": summary,
-                    "followUps": ["止损怎么设更稳？", "压力位突破后怎么加仓？", "我最大回撤 8%"],
-                    "session_id": uuid.uuid4().hex,
-                }
-            else:
-                # 中线更强调“验证点/分批/风控”，但仍给可执行触发条件
-                mid_tone = "可等待回调企稳后分批" if (percentile >= 60 or pct_chg >= 7) else "可逢回调分批，但更重风控"
-                summary = (
-                    f"⚠️【中线（1-3个月）策略】结论：{mid_tone}。\n"
-                    f"验证点：不破 {sup_s or '关键支撑'} 且回升站稳后再加仓；上破 {res_s or '关键压力'} 视为趋势确认。\n"
-                    f"风控：跌破支撑要收缩仓位；分批建仓、分批止盈，避免一次性满仓。\n"
-                    f"参考数据：现价 {price:.2f} 元，近1年价格分位 {percentile:.2f}%，10/20日动量 {change_10:+.2f}% / {change_20:+.2f}%。"
-                )
-                return {
-                    "summary": summary,
-                    "followUps": ["给我中线建仓分批方案", "目标位怎么定？", "我最大回撤 8%"],
-                    "session_id": uuid.uuid4().hex,
-                }
-
-        # 买入建议：必须直接回答“买不买”，并分短线/中线给明确结论 + 理由 + 风控，不再先反问周期
-        if ask_buy:
-            sup = None
-            res = None
-            try:
-                if lo is not None:
-                    sup = float(lo)
-            except Exception:
-                sup = None
-            try:
-                if hi is not None:
-                    res = float(hi)
-            except Exception:
-                res = None
-            sup_s = f"{sup:.2f}" if isinstance(sup, (int, float)) else None
-            res_s = f"{res:.2f}" if isinstance(res, (int, float)) else None
-
-            short_hint = "不建议追高" if pct_chg >= 7 else "可小仓位试错/等待确认"
-            mid_hint = "等待回调企稳再分批" if percentile >= 60 or pct_chg >= 7 else "可逢回调分批布局（更重风控）"
-
-            # 买入建议只保留关键数据，避免“行情复读”
-            key_line = f"{name}（{symbol}）现价约 {price:.2f} 元，近1年价格分位 {percentile:.2f}%，10/20日动量 {change_10:+.2f}% / {change_20:+.2f}%。"
-            hl_line = ""
-            if sup_s or res_s:
-                parts = []
-                if sup_s:
-                    parts.append(f"支撑 {sup_s}")
-                if res_s:
-                    parts.append(f"压力 {res_s}")
-                hl_line = "关键位：" + "，".join(parts) + "。"
-
-            summary = (
-                f"✅ 短线（1-5天）：{short_hint}。{('若跌破 ' + sup_s + ' 建议止损/减仓。') if sup_s else '若回落失守关键支撑，建议止损/减仓。'}\n"
-                f"⚠️ 中线（1-3个月）：{mid_hint}。{('回调到 ' + sup_s + ' 附近企稳再考虑分批。') if sup_s else '等待回调企稳再考虑分批。'}\n"
-                f"{key_line}{today_line}\n"
-                f"{hl_line}\n"
-                "以上仅供参考，不构成投资依据；投资有风险，入市需谨慎。"
-            )
-            return {
-                "summary": summary,
-                "followUps": ["按短线给我具体进出场", "按中线给我建仓/止损/目标", "我最大回撤 8%"],
-                "session_id": uuid.uuid4().hex,
-            }
-
-        if ask_risk:
-            sup = None
-            res = None
-            try:
-                if lo is not None:
-                    sup = float(lo)
-            except Exception:
-                sup = None
-            try:
-                if hi is not None:
-                    res = float(hi)
-            except Exception:
-                res = None
-            sup_s = f"{sup:.2f}（今日低点）" if isinstance(sup, (int, float)) else "今日低点"
-            res_s = f"{res:.2f}（今日高点）" if isinstance(res, (int, float)) else "今日高点"
-            summary = (
-                f"{base}{today_line}\n"
-                f"风控抓手：支撑先看 {sup_s}，压力先看 {res_s}；跌破支撑要收缩风险敞口，突破压力再做趋势确认。\n"
-                "如果你告诉我持有周期（短线/中线）与最大可承受回撤（5%/8%/10%），我可以把止损触发与仓位节奏写成可执行规则。"
-            )
-            return {
-                "summary": summary,
-                "followUps": ["最大回撤 5%", "最大回撤 8%", "短线交易", "中线持有"],
-                "session_id": uuid.uuid4().hex,
-            }
-
-        if ask_trend:
-            tilt = "短线偏强" if (pct_chg >= 0 and (change_10 >= 0 or change_20 >= 0)) else "短线偏弱/震荡"
-            summary = (
-                f"{base}{today_line}\n"
-                f"10/20日动量约 {change_10:+.2f}% / {change_20:+.2f}%。结论：{tilt}。"
-                "短线先盯今日高低点的突破/跌破；中线更看分位从低位回升的持续性。"
-            )
-            return {
-                "summary": summary,
-                "followUps": ["按短线给我具体进出场", "按中线给我关键验证点"],
-                "session_id": uuid.uuid4().hex,
-            }
-
-        summary = f"{base}{today_line}\n你更关注短线（1-5天）还是中线（1-3个月）？我会按对应周期给你策略。"
-        return {
-            "summary": summary,
-            "followUps": ["短线（1-5天）", "中线（1-3个月）"],
-            "session_id": uuid.uuid4().hex,
-        }
-
     stock = {}
     try:
-        if use_stock_context:
+        if _is_a_share_6digit(symbol):
             live = _fetch_a_share_quote(symbol)
         else:
             live = None
@@ -925,7 +1199,56 @@ def research_analyze(symbol: str, question: str, chat_history=None):
         stock = {}
 
     llm_env = _get_llm_env()
+    # 保留模型可追溯信息：当前问答模型来自 .env 的 LLM_API_BASE / LLM_MODEL
     llm_ready = bool(llm_env.get("api_base") and llm_env.get("model") and llm_env.get("api_key"))
+    q_text = str(question or "").strip()
+    q_ctx = _build_quote_context_text(q_text, history)
+    gold_market = _detect_gold_market(q_ctx)
+    gold_quote = _fetch_gold_live_quote(q_ctx) if gold_market else None
+    index_quote = _fetch_index_live_quote(q_ctx)
+    generic_quote, has_quote_target = _fetch_realtime_quote_by_question(q_text, history)
+    live_quote = gold_quote or index_quote or generic_quote
+    # 关键修复：只要已经拿到实时 quote（哪怕 target 解析置信度一般），也必须优先走“先查后答”分支
+    # 防止回落到通用 LLM 后出现脱离实时数据的数字（如历史旧价/错误口径）。
+    if has_quote_target or live_quote:
+        if live_quote:
+            if _is_history_scope_question(q_text):
+                verified = _verified_history_summary(q_text, live_quote)
+                if verified:
+                    trend_summary = _llm_enrich_history_summary(live_quote, q_text, verified, history, llm_ready)
+                    return {
+                        "summary": f"{_build_live_quote_summary(live_quote)} {trend_summary}",
+                        "followUps": [
+                            "看近3个月/近1年的区间结果",
+                            "补充这个区间的波动风险点",
+                        ],
+                        "session_id": uuid.uuid4().hex,
+                    }
+                return {
+                    "summary": _build_history_scope_guard(live_quote),
+                    "followUps": [
+                        "先看这个标的的实时价和日内高低",
+                        "历史源恢复后再看最高/最低",
+                    ],
+                    "session_id": uuid.uuid4().hex,
+                }
+            summary = _llm_enrich_live_quote(live_quote, q_text, history, llm_ready)
+            return {
+                "summary": summary,
+                "followUps": [
+                    "看近一周波动区间",
+                    "补充这个标的的影响因素",
+                ],
+                "session_id": uuid.uuid4().hex,
+            }
+        return {
+            "summary": "我当前没拿到可用的实时行情报价（可能是行情源超时或符号不支持），为了避免误导，不给你编造数字。你可以稍后重试，或把标的名称说得更具体。",
+            "followUps": [
+                "你想查哪个具体标的（如沪深300、上证、现货黄金）？",
+                "要不要我改成多数据源兜底（新浪+备用源）？",
+            ],
+            "session_id": uuid.uuid4().hex,
+        }
     # 通用：热点/快讯（无论是否传 symbol 都可用）
     hot = []
     try:
@@ -951,7 +1274,7 @@ def research_analyze(symbol: str, question: str, chat_history=None):
         global_news = []
 
     # 1) 传了 A 股代码：用“个股上下文”回答（更细）
-    if llm_ready and use_stock_context:
+    if llm_ready and _is_a_share_6digit(symbol):
         try:
             daily = _get_stock_daily_bars(symbol)
             if not daily:
@@ -979,11 +1302,8 @@ def research_analyze(symbol: str, question: str, chat_history=None):
             user_msg = {
                 "symbol": symbol,
                 "name": name,
-                "question": effective_q,
+                "question": question,
                 "chat_history": history,
-                "dialog_state": {
-                    "cycle": "短线(1-5天)" if cycle_choice == "short" else ("中线(1-3个月)" if cycle_choice == "mid" else ""),
-                },
                 "quote": {
                     "price": stock.get("price"),
                     "pct_chg": pct_chg,
@@ -1007,12 +1327,9 @@ def research_analyze(symbol: str, question: str, chat_history=None):
             }
 
             system_msg = (
-                "你是「财懂了」专业金融AI助手，专注A股个股分析。核心铁律："
-                "1) 100%匹配用户问题，禁止答非所问；"
-                "2) 禁止复述用户问题/原句（如“你问的是...”或“直接回答你的问题：...”），直接给结论；"
-                "3) 若用户问“买不买/建议买吗”，必须直接给出短线(1-5天)/中线(1-3个月)的明确建议+理由+风控，不要先反问周期；"
-                "4) 必须优先使用输入中的绑定标的行情/历史数据，禁止按通用逻辑回答。"
-                "这是多轮对话，必须先理解 chat_history 的上下文，再回答本轮 question。"
+                "你是金融研究助理。根据输入的行情/历史/新闻趋势回答用户问题。"
+                "这是多轮对话，必须先理解 chat_history 的上下文，再回答本轮 question，避免答非所问。"
+                "语气自然，避免固定小标题模板和机械分段。"
                 "必须只输出合法 JSON 对象，包含 key: summary（字符串）与 followUps（字符串数组，2-3条）。禁止 Markdown。"
             )
             messages = [
@@ -1035,30 +1352,29 @@ def research_analyze(symbol: str, question: str, chat_history=None):
     # 2) 没传 symbol 或不是 A 股：走“通用全面分析”
     if llm_ready:
         try:
-            pulse_titles = [
-                str(x.get("title") or "").strip()
-                for x in global_news
-                if isinstance(x, dict) and str(x.get("title") or "").strip()
-            ][:6]
             user_msg = {
-                "question": effective_q,
+                "question": str(question or "").strip(),
                 "chat_history": history,
                 "market_pulse": {
                     "hot_topics": hot,
-                    "global_news_titles": pulse_titles,
+                    "global_news_tail": [
+                        {"title": x.get("title"), "summary": x.get("summary"), "source": x.get("source"), "url": x.get("url")}
+                        for x in global_news
+                        if isinstance(x, dict)
+                    ],
                 },
                 "style": "口语化、连续对话风格，先回答问题，再给1个可执行关注点",
+                "live_quote": live_quote if live_quote else None,
+                "live_quote_status": "ok" if live_quote else ("missing" if has_quote_target else "not_requested"),
             }
             system_msg = (
                 "你是金融研究助理。根据用户问题与市场快讯/热点，给出通用的“全面分析”。"
                 "这是多轮对话，必须结合 chat_history 理解用户追问对象（例如“那最近一个月呢”要承接上一问）。"
                 "语气自然，避免固定模板句式。"
-                "禁止复述用户原句（如“你问的是...”），直接给结论。"
-                "优先直接回答本轮问题，不要照搬或复述输入 JSON 字段。"
-                "若用户问的是具体价格/点位（如黄金、汇率、油价），先明确口径（现货/期货、美元/人民币）并给可执行查询方式；"
-                "没有实时数值时，明确说明“当前会话未连接该品种实时行情”，不要编造具体价格。"
                 "必须只输出合法 JSON 对象，包含 key: summary（字符串）与 followUps（字符串数组，2-3条）。禁止 Markdown。"
-                "如果问题没有明确资产/品种，请先用 1 句澄清默认口径。"
+                "如果问题没有明确资产/品种，请先用 1 句澄清默认口径（如：按国内市场视角/以黄金=国际金价）。"
+                "若 user_msg.live_quote_status=ok：必须优先使用 live_quote 的价格/涨跌幅/时间，禁止改写数值。"
+                "若 user_msg.live_quote_status=missing 且问题涉及价格：必须明确说明“当前无法获取实时价格”，禁止给任何具体价格数字。"
             )
             messages = [
                 {"role": "system", "content": system_msg},
@@ -1077,83 +1393,29 @@ def research_analyze(symbol: str, question: str, chat_history=None):
         except Exception:
             pass
 
-    # 3) 没配 LLM：规则化兜底（按问题类型回答，避免机械拼接“样本热点”）
-    q = effective_q
-    q_low = q.lower()
-    ask_price = any(k in q for k in ["多少钱", "多少点", "价格", "报价", "现价", "实时"]) or any(
-        k in q_low for k in ["price", "quote", "realtime"]
-    )
-    ask_gold = any(k in q for k in ["黄金", "金价", "伦敦金", "沪金"])
-    ask_fx = any(k in q for k in ["汇率", "美元", "离岸", "在岸", "人民币"])
-    ask_oil = any(k in q for k in ["原油", "油价", "布伦特", "wti"])
-
-    if ask_price and ask_gold:
-        summary = (
-            "当前会话未连接黄金实时行情，无法直接给出精确现价。\n"
-            "若按通用口径，建议先确认你要看的是：国际现货金（XAUUSD）还是国内沪金主力（AU）。\n"
-            "可执行做法：在行情终端搜索 XAUUSD/AU 主力查看最新价，再结合近1日波动与美元指数判断短线节奏。"
-        )
-        followups = [
-            "你要看国际现货金（美元）还是沪金（人民币）？",
-            "按1天还是1个月维度看波动？"
-        ]
-        return {"summary": summary, "followUps": followups, "session_id": uuid.uuid4().hex}
-
-    if ask_price and ask_fx:
-        summary = (
-            "当前会话未连接外汇实时行情，不能直接给出精确报价。\n"
-            "请先确认口径：美元兑人民币（USDCNY 在岸）或 USDCNH（离岸）。\n"
-            "拿到现价后，建议结合近期政策预期与中美利差变化评估短期方向。"
-        )
-        followups = [
-            "你要看在岸 USDCNY 还是离岸 USDCNH？",
-            "需要我按短线（日内）还是中线（1个月）给你分析框架？"
-        ]
-        return {"summary": summary, "followUps": followups, "session_id": uuid.uuid4().hex}
-
-    if ask_price and ask_oil:
-        summary = (
-            "当前会话未连接原油实时行情，无法直接给出精确现价。\n"
-            "请先确认口径：布伦特（Brent）还是 WTI。\n"
-            "拿到现价后，建议结合库存数据、地缘事件与美元走势判断短线强弱。"
-        )
-        followups = [
-            "你关注布伦特还是 WTI？",
-            "更想看短线交易节奏还是中期供需逻辑？"
-        ]
-        return {"summary": summary, "followUps": followups, "session_id": uuid.uuid4().hex}
-
-    if not q:
-        summary = "我可以直接按你的问题回答。你可以告诉我具体资产与时间维度，例如：黄金（1天/1个月）或某只A股的短线观点。"
-        return {"summary": summary, "followUps": DEFAULT_CHAT_FOLLOWUPS[:2], "session_id": uuid.uuid4().hex}
-
-    ask_trend = any(k in q for k in ["走势", "看涨", "看跌", "方向", "涨还是跌", "趋势"])
-    ask_risk = any(k in q for k in ["风险", "回撤", "止损", "仓位", "波动"])
-    ask_time = any(k in q for k in ["今天", "本周", "这个月", "一个月", "短线", "中线", "日内"])
-    ask_compare = any(k in q for k in ["对比", "比较", "哪个好", "A还是B", "vs", "PK"])
-
-    if ask_compare:
-        summary = "比较两个标的时，建议用同一口径对齐三件事：当前价格位置（分位）、近1个月动量、风险暴露（回撤与波动）。"
-        followups = ["请告诉我要比较的两个标的全称", "你更看重收益潜力还是回撤控制？"]
-        return {"summary": summary, "followUps": followups, "session_id": uuid.uuid4().hex}
-
-    if ask_trend:
-        summary = "先看短周期动量，再看关键支撑/压力位，最后用仓位纪律控制回撤；这是当前未绑定单一标的时最稳妥的执行框架。"
-        followups = ["你要按1天、1周还是1个月来判断趋势？", "要不要我给你一个更具体的进出场模板？"]
-        return {"summary": summary, "followUps": followups, "session_id": uuid.uuid4().hex}
-
-    if ask_risk:
-        summary = "为了给你可执行的风控方案，请先确认两个参数：最大可承受回撤（5%/8%/10%）和交易周期（短线/中线）。"
-        followups = ["最大回撤 5%", "最大回撤 8%", "短线交易", "中线持有"]
-        return {"summary": summary, "followUps": followups, "session_id": uuid.uuid4().hex}
-
-    if ask_time:
-        summary = "时间维度会显著影响结论：短线看情绪与动量，中线看基本面与资金风格。"
-        followups = ["是否需要我分别给出短线和中线两套判断？", "你希望结论偏保守还是偏进攻？"]
-        return {"summary": summary, "followUps": followups, "session_id": uuid.uuid4().hex}
+    # 3) 没配 LLM：规则化兜底（仍尽量“全面”）
+    q = str(question or "").strip()
+    top_hot = hot[:3] if isinstance(hot, list) else []
+    top_news = global_news[:3] if isinstance(global_news, list) else []
+    hot_txt = "、".join([str(x.get("name") or x.get("leader") or "")[:18] for x in top_hot if isinstance(x, dict)]) or "（暂无）"
+    news_txt = "；".join([str(x.get("title") or "")[:36] for x in top_news if isinstance(x, dict)]) or "（暂无）"
+    if has_quote_target:
+        if live_quote:
+            summary = _build_live_quote_summary(live_quote) + "（当前为规则直出模式）"
+        else:
+            summary = "当前未拿到可用的实时行情（规则直出模式），为避免误导不输出具体价格。"
+        return {
+            "summary": summary,
+            "followUps": DEFAULT_CHAT_FOLLOWUPS[:2],
+            "session_id": uuid.uuid4().hex,
+        }
 
     summary = (
-        "当前是通用模式（未绑定单一股票）。若提供具体资产（代码/品种）和时间维度，我会给更精确、可执行的结论。"
+        "当前为通用模式（未绑定单一股票）。\n"
+        f"你的问题：{q or '（未提供问题）'}\n"
+        f"市场热点（样本）：{hot_txt}\n"
+        f"快讯摘要（样本）：{news_txt}\n"
+        "分析口径：短期看情绪与政策/数据节奏，中期看基本面与资金风格切换；注意波动与仓位纪律（不构成投资建议）。"
     )
     return {
         "summary": summary,

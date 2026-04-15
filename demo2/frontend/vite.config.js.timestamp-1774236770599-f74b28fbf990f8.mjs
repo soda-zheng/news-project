@@ -1,0 +1,25 @@
+// vite.config.js
+import { defineConfig } from "file:///D:/demoo/demoo/demo2/frontend/node_modules/vite/dist/node/index.js";
+import vue from "file:///D:/demoo/demoo/demo2/frontend/node_modules/@vitejs/plugin-vue/dist/index.mjs";
+var API_TARGET = process.env.VITE_API_PROXY || "http://127.0.0.1:5000";
+var apiProxy = {
+  "/api": {
+    target: API_TARGET,
+    changeOrigin: true
+  }
+};
+var vite_config_default = defineConfig({
+  plugins: [vue()],
+  server: {
+    port: 5173,
+    proxy: apiProxy
+  },
+  preview: {
+    port: 4173,
+    proxy: apiProxy
+  }
+});
+export {
+  vite_config_default as default
+};
+//# sourceMappingURL=data:application/json;base64,ewogICJ2ZXJzaW9uIjogMywKICAic291cmNlcyI6IFsidml0ZS5jb25maWcuanMiXSwKICAic291cmNlc0NvbnRlbnQiOiBbImNvbnN0IF9fdml0ZV9pbmplY3RlZF9vcmlnaW5hbF9kaXJuYW1lID0gXCJEOlxcXFxkZW1vb1xcXFxkZW1vb1xcXFxkZW1vMlxcXFxmcm9udGVuZFwiO2NvbnN0IF9fdml0ZV9pbmplY3RlZF9vcmlnaW5hbF9maWxlbmFtZSA9IFwiRDpcXFxcZGVtb29cXFxcZGVtb29cXFxcZGVtbzJcXFxcZnJvbnRlbmRcXFxcdml0ZS5jb25maWcuanNcIjtjb25zdCBfX3ZpdGVfaW5qZWN0ZWRfb3JpZ2luYWxfaW1wb3J0X21ldGFfdXJsID0gXCJmaWxlOi8vL0Q6L2RlbW9vL2RlbW9vL2RlbW8yL2Zyb250ZW5kL3ZpdGUuY29uZmlnLmpzXCI7aW1wb3J0IHsgZGVmaW5lQ29uZmlnIH0gZnJvbSAndml0ZSdcbmltcG9ydCB2dWUgZnJvbSAnQHZpdGVqcy9wbHVnaW4tdnVlJ1xuXG4vKiogXHU0RTBFIGJhY2tlbmQgRmxhc2sgXHU5RUQ4XHU4QkE0XHU3QUVGXHU1M0UzXHU0RTAwXHU4MUY0XHVGRjFCcHJldmlldyBcdTRFNUZcdTVGQzVcdTk4N0JcdTRFRTNcdTc0MDZcdUZGMENcdTU0MjZcdTUyMTkgL2FwaSBcdTRGMUEgNDA0ICovXG5jb25zdCBBUElfVEFSR0VUID0gcHJvY2Vzcy5lbnYuVklURV9BUElfUFJPWFkgfHwgJ2h0dHA6Ly8xMjcuMC4wLjE6NTAwMCdcblxuY29uc3QgYXBpUHJveHkgPSB7XG4gICcvYXBpJzoge1xuICAgIHRhcmdldDogQVBJX1RBUkdFVCxcbiAgICBjaGFuZ2VPcmlnaW46IHRydWUsXG4gIH0sXG59XG5cbmV4cG9ydCBkZWZhdWx0IGRlZmluZUNvbmZpZyh7XG4gIHBsdWdpbnM6IFt2dWUoKV0sXG4gIHNlcnZlcjoge1xuICAgIHBvcnQ6IDUxNzMsXG4gICAgcHJveHk6IGFwaVByb3h5LFxuICB9LFxuICBwcmV2aWV3OiB7XG4gICAgcG9ydDogNDE3MyxcbiAgICBwcm94eTogYXBpUHJveHksXG4gIH0sXG59KVxuIl0sCiAgIm1hcHBpbmdzIjogIjtBQUFtUixTQUFTLG9CQUFvQjtBQUNoVCxPQUFPLFNBQVM7QUFHaEIsSUFBTSxhQUFhLFFBQVEsSUFBSSxrQkFBa0I7QUFFakQsSUFBTSxXQUFXO0FBQUEsRUFDZixRQUFRO0FBQUEsSUFDTixRQUFRO0FBQUEsSUFDUixjQUFjO0FBQUEsRUFDaEI7QUFDRjtBQUVBLElBQU8sc0JBQVEsYUFBYTtBQUFBLEVBQzFCLFNBQVMsQ0FBQyxJQUFJLENBQUM7QUFBQSxFQUNmLFFBQVE7QUFBQSxJQUNOLE1BQU07QUFBQSxJQUNOLE9BQU87QUFBQSxFQUNUO0FBQUEsRUFDQSxTQUFTO0FBQUEsSUFDUCxNQUFNO0FBQUEsSUFDTixPQUFPO0FBQUEsRUFDVDtBQUNGLENBQUM7IiwKICAibmFtZXMiOiBbXQp9Cg==

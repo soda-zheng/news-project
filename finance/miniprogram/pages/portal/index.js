@@ -40,6 +40,8 @@ const DEFAULT_STOCK_QUICK_QUESTIONS = [
 
 const PORTAL_UI_THEME_KEY = 'portal_ui_theme' // system|light|dark
 const PORTAL_REMINDER_SETTINGS_KEY = 'portal_reminder_settings'
+/** 自选列表在「观察清单」页停留时轮询行情（毫秒）；与交易所推送级实时不同，属准实时刷新 */
+const WATCHLIST_QUOTE_POLL_MS = 5000
 
 function defaultReminderSettings() {
   return {
@@ -651,38 +653,86 @@ Page({
       saveWatchlistCodes(rows.map((r) => r.code))
     } catch (e3) {}
     this.setData({ watchlistItems: rows, watchlistCount: rows.length })
-    this._refreshWatchlistQuotes(rows.map((r) => r.code))
+    this._refreshWatchlistQuotes(rows)
   },
 
   _refreshProfile() {
     this.setData({ profileUser: getStoredUser() })
   },
 
-  _refreshWatchlistQuotes(codeList) {
-    const codes = Array.isArray(codeList) ? codeList : []
-    codes.forEach((code) => {
-      if (!isAshare6digit(code)) return
-      getQuote(code)
-        .then((res) => {
-          if (res.code !== 200 || !res.data) return
-          const d = res.data
-          const pct = Number(d.pct_chg)
-          const items = (this.data.watchlistItems || []).map((row) => {
-            if (row.code !== code) return row
-            const pos = Number.isFinite(pct) ? pct >= 0 : true
-            const ch = Number.isFinite(pct) ? (pct >= 0 ? `+${pct.toFixed(2)}%` : `${pct.toFixed(2)}%`) : '--'
-            return {
-              code,
-              name: d.name || code,
-              labelCode: d.symbol || code,
-              changeStr: ch,
-              positive: pos
-            }
-          })
-          this.setData({ watchlistItems: items, watchlistCount: items.length })
-        })
-        .catch(() => {})
+  _refreshWatchlistQuotes(rowsOrCodes) {
+    const arr = Array.isArray(rowsOrCodes) ? rowsOrCodes : []
+    const baseRows = arr.length && typeof arr[0] === 'object' && arr[0] != null && 'code' in arr[0] ? arr : buildWatchlistRows(arr)
+    const want = baseRows.map((r) => r.code).filter((c) => isAshare6digit(String(c || '').trim()))
+    if (!want.length) return
+    const wantSet = new Set(want)
+    const seq = (this._watchlistQuoteReqSeq = (this._watchlistQuoteReqSeq || 0) + 1)
+    Promise.all(
+      want.map((code) =>
+        getQuote(code).then(
+          (res) => ({ code, res }),
+          () => ({ code, res: null })
+        )
+      )
+    ).then((pairs) => {
+      if (seq !== this._watchlistQuoteReqSeq) return
+      const byCode = new Map()
+      for (const p of pairs) {
+        if (!p || !p.code) continue
+        byCode.set(p.code, p.res)
+      }
+      const items = baseRows.map((row) => {
+        const code = row && row.code
+        if (!isAshare6digit(String(code || '').trim())) return row
+        if (!wantSet.has(code)) return row
+        const res = byCode.get(code)
+        if (!res || res.code !== 200 || !res.data) {
+          return { ...row, changeStr: '--', positive: true }
+        }
+        const d = res.data
+        const pct = Number(d.pct_chg)
+        const pos = Number.isFinite(pct) ? pct >= 0 : true
+        const ch = Number.isFinite(pct) ? (pct >= 0 ? `+${pct.toFixed(2)}%` : `${pct.toFixed(2)}%`) : '--'
+        return {
+          ...row,
+          code,
+          name: d.name || row.name || code,
+          labelCode: d.symbol || row.labelCode || code,
+          changeStr: ch,
+          positive: pos
+        }
+      })
+      this.setData({ watchlistItems: items, watchlistCount: items.length })
     })
+  },
+
+  _ensureWatchlistQuotesFresh() {
+    const rows = this.data.watchlistItems
+    if (rows && rows.length) {
+      this._refreshWatchlistQuotes(rows.map((r) => ({ ...r })))
+    } else {
+      this._loadWatchlist()
+    }
+  },
+
+  _startWatchlistQuotePoll() {
+    this._stopWatchlistQuotePoll()
+    this._watchlistQuoteTimer = setInterval(() => {
+      if (this.data.activePage !== 'watchlist') {
+        this._stopWatchlistQuotePoll()
+        return
+      }
+      const rows = this.data.watchlistItems
+      if (!rows || !rows.length) return
+      this._refreshWatchlistQuotes(rows.map((r) => ({ ...r })))
+    }, WATCHLIST_QUOTE_POLL_MS)
+  },
+
+  _stopWatchlistQuotePoll() {
+    if (this._watchlistQuoteTimer) {
+      clearInterval(this._watchlistQuoteTimer)
+      this._watchlistQuoteTimer = null
+    }
   },
 
   onReady() {
@@ -739,6 +789,15 @@ Page({
     if (this.data.activePage === 'chat') this._layoutChatArea()
     this._refreshProfile()
     this._loadWatchlist()
+    if (this.data.activePage === 'watchlist') this._startWatchlistQuotePoll()
+  },
+
+  onHide() {
+    this._stopWatchlistQuotePoll()
+  },
+
+  onUnload() {
+    this._stopWatchlistQuotePoll()
   },
 
   switchPage(pageId) {
@@ -792,6 +851,12 @@ Page({
         this.refreshLiveQuote(k, { skipKlineAi: false })
       }
     }
+    if (pageId === 'watchlist') {
+      this._ensureWatchlistQuotesFresh()
+      this._startWatchlistQuotePoll()
+    } else {
+      this._stopWatchlistQuotePoll()
+    }
   },
 
   stopBubble() {},
@@ -809,7 +874,7 @@ Page({
 
   _loadHomeNewsEnhanced() {
     this.setData({ _homeNewsLoading: true })
-    getHomeNewsEnhanced(10, this.data.homeNewsRegion)
+    getHomeNewsEnhanced(undefined, this.data.homeNewsRegion)
       .then((res) => {
         console.log('📰 首页新闻 API 响应:', res)
         if (res.code === 200 && res.data && Array.isArray(res.data.items)) {
@@ -978,7 +1043,7 @@ Page({
     } catch (e2) {}
     const rows = buildWatchlistRows(codes)
     this.setData({ watchlistItems: rows, watchlistCount: rows.length })
-    this._refreshWatchlistQuotes(rows.map((r) => r.code))
+    this._refreshWatchlistQuotes(rows)
     wx.showToast({ title: `已加入 ${added} 只`, icon: 'success' })
   },
 
@@ -1650,7 +1715,7 @@ Page({
         } catch (err) {}
         const rows = buildWatchlistRows(next)
         this.setData({ watchlistItems: rows, watchlistCount: rows.length })
-        this._refreshWatchlistQuotes(rows.map((r) => r.code))
+        this._refreshWatchlistQuotes(rows)
         wx.showToast({ title: '已移除', icon: 'success' })
       }
     })
@@ -1691,7 +1756,7 @@ Page({
       watchlistAddVisible: false,
       watchlistAddInput: ''
     })
-    this._refreshWatchlistQuotes(rows.map((r) => r.code))
+    this._refreshWatchlistQuotes(rows)
     wx.showToast({ title: '已添加', icon: 'success' })
   },
 
