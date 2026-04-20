@@ -1,4 +1,4 @@
-const { getStoredUser, applyWeChatUserProfile } = require('../../utils/auth')
+const { getStoredUser, applyWeChatUserProfile, ensureBackendUserId } = require('../../utils/auth')
 
 const DEFAULT_AVATAR = '/assets/logo.png'
 
@@ -52,6 +52,7 @@ Page({
     const avatarUrl = String(this.data.draftAvatar || '').trim() || DEFAULT_AVATAR
     const userInfo = { nickName: nick, avatarUrl }
     applyWeChatUserProfile(userInfo)
+    ensureBackendUserId()
     this.setData({ userInfo, showBindModal: false })
     wx.showToast({ title: '绑定成功', icon: 'success' })
   },
@@ -66,6 +67,7 @@ Page({
           return
         }
         applyWeChatUserProfile(ui)
+        ensureBackendUserId()
         this.setData({
           userInfo: ui,
           draftNickname: ui.nickName || '',
@@ -76,11 +78,13 @@ Page({
       },
       fail: (err) => {
         const msg = (err && err.errMsg) || '授权失败'
-        wx.showModal({
-          title: '旧版授权不可用',
-          content: `${msg}\n请使用本页「选择头像 + 输入昵称」完成绑定。`,
-          showCancel: false,
+        const u = getStoredUser()
+        this.setData({
+          showBindModal: true,
+          draftNickname: u && u.nickName ? u.nickName : this.data.draftNickname,
+          draftAvatar: u && u.avatarUrl ? u.avatarUrl : this.data.draftAvatar,
         })
+        wx.showToast({ title: `${msg}，请手动完善`, icon: 'none' })
       },
     })
   },

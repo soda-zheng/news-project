@@ -20,22 +20,20 @@
       </view>
       <view class="news-scope-tabs">
         <view
-          class="news-scope-tab {{homeNewsRegion === 'all' ? 'active' : ''}}"
-          data-region="all"
+          class="news-scope-tab {{homeNewsMode === 'all' ? 'active' : ''}}"
+          data-mode="all"
           bindtap="onHomeNewsScopeTap"
         >全部</view>
         <view
-          class="news-scope-tab {{homeNewsRegion === 'domestic' ? 'active' : ''}}"
-          data-region="domestic"
+          class="news-scope-tab {{homeNewsMode === 'personal' ? 'active' : ''}}"
+          data-mode="personal"
           bindtap="onHomeNewsScopeTap"
-        >国内</view>
-        <view
-          class="news-scope-tab {{homeNewsRegion === 'global' ? 'active' : ''}}"
-          data-region="global"
-          bindtap="onHomeNewsScopeTap"
-        >国际</view>
+        >个性化</view>
       </view>
       <view wx:if="{{_homeNewsLoading}}" class="news-loading-hint">加载中…</view>
+      <view wx:if="{{!_homeNewsLoading && (!homeNewsList || !homeNewsList.length) && homeNewsMode === 'personal'}}" class="news-loading-hint">
+        暂无与你自选相关的新闻，可先添加自选股
+      </view>
       <view
         class="news-item"
         wx:for="{{homeNewsList}}"
@@ -153,8 +151,14 @@
     </view>
     <view class="stock-info-card">
       <view class="stock-name-row">
-        <text class="stock-name-lg">{{stockName}}</text>
-        <text class="stock-code-lg">{{stockCode}}</text>
+        <view class="stock-name-meta">
+          <text class="stock-name-lg">{{stockName}}</text>
+          <text class="stock-code-lg">{{stockCode}}</text>
+        </view>
+        <view
+          class="stock-watchlist-btn {{stockInWatchlist ? 'is-added' : ''}}"
+          bindtap="onAddCurrentStockToWatchlist"
+        >{{stockInWatchlist ? '已在自选' : '加入自选'}}</view>
       </view>
       <view class="price-row">
         <text class="stock-price-lg">{{stockPrice}}</text>

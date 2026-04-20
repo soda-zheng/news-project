@@ -1,5 +1,5 @@
 const { getSelectedCode } = require('./utils/state')
-const { getStoredUser, getLoginMeta } = require('./utils/auth')
+const { getStoredUser, getLoginMeta, ensureLocalUserId, ensureBackendUserId } = require('./utils/auth')
 
 App({
   globalData: {
@@ -11,6 +11,9 @@ App({
     this.globalData.selectedCode = getSelectedCode()
     this.globalData.userInfo = getStoredUser()
     this.globalData.loginMeta = getLoginMeta()
+    ensureLocalUserId()
+    // 尽早完成 code->openid 绑定，便于后续自选云同步
+    ensureBackendUserId()
   }
 })
 

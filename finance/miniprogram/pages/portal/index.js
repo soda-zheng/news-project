@@ -6,6 +6,8 @@ const {
   postStockLLMInsight,
   postResearchAnalyze,
   getHomeNewsEnhanced,
+  getUserWatchlist,
+  putUserWatchlist,
   postNewsAiAnalyze,
   uploadPdf,
   startAnalyze,
@@ -273,7 +275,7 @@ function toChatChipsFromFollowUps(items) {
 }
 
 const { readWatchlistCodesRaw, saveWatchlistCodes } = require('../../utils/watchlistStorage')
-const { getStoredUser, clearWeChatUserProfile } = require('../../utils/auth')
+const { getStoredUser, clearWeChatUserProfile, ensureBackendUserId } = require('../../utils/auth')
 /** 上次在个股页选中的 A 股代码（仅本机） */
 const PORTAL_LAST_STOCK_KEY = 'portal_last_stock_code'
 const TOPIC_NOTES_KEY = 'portal_topic_notes'
@@ -553,6 +555,7 @@ Page({
     stockPrice: '¥--',
     stockChange: '--',
     stockChangePositive: true,
+    stockInWatchlist: false,
     stockDetail: '—',
     high52w: '¥--',
     low52w: '¥--',
@@ -616,6 +619,7 @@ Page({
     reminderSettings: defaultReminderSettings(),
     homeNewsList: [],
     homeNewsRegion: 'all',
+    homeNewsMode: 'all',
     _newsAnalysisCache: {},
     _homeNewsLoading: false,
     stockSuggestList: [],
@@ -652,8 +656,51 @@ Page({
     try {
       saveWatchlistCodes(rows.map((r) => r.code))
     } catch (e3) {}
-    this.setData({ watchlistItems: rows, watchlistCount: rows.length })
+    this.setData({ watchlistItems: rows, watchlistCount: rows.length }, () => this._refreshStockWatchlistState())
     this._refreshWatchlistQuotes(rows)
+    this._syncWatchlistFromCloud()
+  },
+
+  _refreshStockWatchlistState(preferredCode) {
+    const code =
+      normalizeToAshare6(preferredCode) ||
+      normalizeToAshare6(this.data.stockCode) ||
+      normalizeToAshare6((this.data.currentStock && this.data.currentStock.code) || '') ||
+      normalizeToAshare6(this.data.stockSearchInput) ||
+      ''
+    const wl = new Set((this.data.watchlistItems || []).map((r) => String((r && r.code) || '').trim()))
+    const inList = !!(code && wl.has(code))
+    this.setData({ stockInWatchlist: inList })
+  },
+
+  _syncWatchlistFromCloud() {
+    ensureBackendUserId()
+      .then((uid) => {
+        const userId = String(uid || '').trim()
+        if (!userId) return null
+        return getUserWatchlist(userId)
+      })
+      .then((res) => {
+        if (!res || res.code !== 200 || !res.data || !Array.isArray(res.data.codes)) return
+        const rows = buildWatchlistRows(res.data.codes)
+        try {
+          saveWatchlistCodes(rows.map((r) => r.code))
+        } catch (e) {}
+        this.setData({ watchlistItems: rows, watchlistCount: rows.length }, () => this._refreshStockWatchlistState())
+        this._refreshWatchlistQuotes(rows)
+      })
+      .catch(() => {})
+  },
+
+  _pushWatchlistToCloud(codes) {
+    const arr = Array.isArray(codes) ? codes : []
+    ensureBackendUserId()
+      .then((uid) => {
+        const userId = String(uid || '').trim()
+        if (!userId) return null
+        return putUserWatchlist(userId, arr)
+      })
+      .catch(() => {})
   },
 
   _refreshProfile() {
@@ -867,15 +914,38 @@ Page({
   },
 
   onHomeNewsScopeTap(e) {
-    const r = e.currentTarget.dataset.region
-    if (!r || r === this.data.homeNewsRegion) return
-    this.setData({ homeNewsRegion: r }, () => this._loadHomeNewsEnhanced())
+    const mode = String(e.currentTarget.dataset.mode || '').trim()
+    if (!mode || mode === this.data.homeNewsMode) return
+    this.setData({ homeNewsMode: mode }, () => this._loadHomeNewsEnhanced())
   },
 
   _loadHomeNewsEnhanced() {
-    this.setData({ _homeNewsLoading: true })
-    getHomeNewsEnhanced(undefined, this.data.homeNewsRegion)
+    const mode = String(this.data.homeNewsMode || 'all').trim() || 'all'
+    const region = String(this.data.homeNewsRegion || 'all').trim() || 'all'
+    const wl = readWatchlistCodesRaw()
+    const wlSig = (Array.isArray(wl) ? wl : [])
+      .map((x) => String(x || '').trim())
+      .filter((x) => /^\d{6}$/.test(x))
+      .sort()
+      .join(',')
+    const cacheKey = `${mode}|${region}|${mode === 'personal' ? wlSig : ''}`
+
+    this._homeNewsCache = this._homeNewsCache || {}
+    const cached = this._homeNewsCache[cacheKey]
+    if (cached && Array.isArray(cached.items) && cached.items.length) {
+      this.setData({ homeNewsList: cached.items, _homeNewsLoading: true })
+    } else {
+      this.setData({ _homeNewsLoading: true })
+    }
+
+    if (mode === 'personal' && (!wl || !wl.length)) {
+      this.setData({ homeNewsList: [], _homeNewsLoading: false })
+      return
+    }
+    const seq = (this._homeNewsReqSeq = (this._homeNewsReqSeq || 0) + 1)
+    getHomeNewsEnhanced(undefined, region, mode, wl)
       .then((res) => {
+        if (seq !== this._homeNewsReqSeq) return
         console.log('📰 首页新闻 API 响应:', res)
         if (res.code === 200 && res.data && Array.isArray(res.data.items)) {
           const items = res.data.items.map((item, idx) => {
@@ -897,7 +967,15 @@ Page({
             }
           })
           console.log('✅ 处理后的新闻列表:', items.length, '条')
-          this.setData({ homeNewsList: items, _homeNewsLoading: false })
+          if (items.length) {
+            this._homeNewsCache[cacheKey] = { items, ts: Date.now() }
+            this.setData({ homeNewsList: items, _homeNewsLoading: false })
+          } else if (cached && Array.isArray(cached.items) && cached.items.length) {
+            // 刷新返回空时，保留上次内容，避免页面“闪空”
+            this.setData({ homeNewsList: cached.items, _homeNewsLoading: false })
+          } else {
+            this.setData({ homeNewsList: [], _homeNewsLoading: false })
+          }
           items.forEach((item) => {
             if (item._raw && item.id) {
               this.data._newsAnalysisCache[item.id] = item._raw
@@ -909,8 +987,13 @@ Page({
         }
       })
       .catch((err) => {
+        if (seq !== this._homeNewsReqSeq) return
         console.error('❌ 首页新闻 API 请求失败:', err)
-        this.setData({ _homeNewsLoading: false })
+        if (cached && Array.isArray(cached.items) && cached.items.length) {
+          this.setData({ homeNewsList: cached.items, _homeNewsLoading: false })
+        } else {
+          this.setData({ _homeNewsLoading: false })
+        }
       })
   },
 
@@ -1041,9 +1124,11 @@ Page({
     try {
       saveWatchlistCodes(codes)
     } catch (e2) {}
+    this._pushWatchlistToCloud(codes)
     const rows = buildWatchlistRows(codes)
-    this.setData({ watchlistItems: rows, watchlistCount: rows.length })
+    this.setData({ watchlistItems: rows, watchlistCount: rows.length }, () => this._refreshStockWatchlistState())
     this._refreshWatchlistQuotes(rows)
+    if (this.data.homeNewsMode === 'personal') this._loadHomeNewsEnhanced()
     wx.showToast({ title: `已加入 ${added} 只`, icon: 'success' })
   },
 
@@ -1713,9 +1798,11 @@ Page({
         try {
           saveWatchlistCodes(next)
         } catch (err) {}
+        this._pushWatchlistToCloud(next)
         const rows = buildWatchlistRows(next)
-        this.setData({ watchlistItems: rows, watchlistCount: rows.length })
+        this.setData({ watchlistItems: rows, watchlistCount: rows.length }, () => this._refreshStockWatchlistState())
         this._refreshWatchlistQuotes(rows)
+        if (this.data.homeNewsMode === 'personal') this._loadHomeNewsEnhanced()
         wx.showToast({ title: '已移除', icon: 'success' })
       }
     })
@@ -1749,14 +1836,16 @@ Page({
     try {
       saveWatchlistCodes(next)
     } catch (e) {}
+    this._pushWatchlistToCloud(next)
     const rows = buildWatchlistRows(next)
     this.setData({
       watchlistItems: rows,
       watchlistCount: rows.length,
       watchlistAddVisible: false,
       watchlistAddInput: ''
-    })
+    }, () => this._refreshStockWatchlistState())
     this._refreshWatchlistQuotes(rows)
+    if (this.data.homeNewsMode === 'personal') this._loadHomeNewsEnhanced()
     wx.showToast({ title: '已添加', icon: 'success' })
   },
 
@@ -2139,6 +2228,7 @@ Page({
       stockPrice: '¥--',
       stockChange: '--',
       stockChangePositive: true,
+      stockInWatchlist: false,
       stockDetail: '—',
       high52w: '¥--',
       low52w: '¥--',
@@ -2201,6 +2291,7 @@ Page({
       stockPrice: priceStr,
       stockChange: pctLabel,
       stockChangePositive: !hasPrice ? true : stock.change >= 0,
+      stockInWatchlist: (this.data.watchlistItems || []).some((r) => r.code === code),
       stockDetail: detail,
       high52w: stock.high ? `¥${stock.high}` : '¥--',
       low52w: stock.low ? `¥${stock.low}` : '¥--',
@@ -2217,6 +2308,33 @@ Page({
       suggestionList: []
     })
     // AI 研判在 K 线 daily-bars 成功并写入分位后再请求，避免与「历史位置」口径不一致；见 _loadKlineForSymbol
+  },
+
+  onAddCurrentStockToWatchlist() {
+    const code =
+      normalizeToAshare6(this.data.stockCode) ||
+      normalizeToAshare6((this.data.currentStock && this.data.currentStock.code) || '') ||
+      normalizeToAshare6(this.data.stockSearchInput) ||
+      ''
+    if (!isAshare6digit(code)) {
+      wx.showToast({ title: '请先选择股票', icon: 'none' })
+      return
+    }
+    const cur = readWatchlistCodesRaw()
+    if (cur.includes(code)) {
+      this.setData({ stockInWatchlist: true })
+      wx.showToast({ title: '已在自选中', icon: 'none' })
+      return
+    }
+    const next = cur.concat([code])
+    try {
+      saveWatchlistCodes(next)
+    } catch (e) {}
+    this._pushWatchlistToCloud(next)
+    const rows = buildWatchlistRows(next)
+    this.setData({ watchlistItems: rows, watchlistCount: rows.length, stockInWatchlist: true })
+    this._refreshWatchlistQuotes(rows)
+    wx.showToast({ title: '已加入自选', icon: 'success' })
   },
 
   _refreshLLMInsightIfPossible(stock) {

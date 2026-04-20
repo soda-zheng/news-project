@@ -4,6 +4,7 @@ import os
 import threading
 import time
 import traceback
+import requests
 
 # 本地开发：backend/.env 中可配置 LLM_API_BASE / LLM_MODEL / LLM_API_KEY
 try:
@@ -40,6 +41,7 @@ from services.market_service import (
     start_warmup_thread,
 )
 from services.report_service import upload_file, create_task, get_task, regen_page
+from services.user_store import init_user_db, upsert_wechat_user, get_watchlist_codes, set_watchlist_codes
 from utils.helpers import (
     _now_str,
     _parse_symbol,
@@ -71,6 +73,32 @@ _HOME_NEWS_LIMIT = _env_int("HOME_NEWS_LIMIT", 10, 1, 20)
 _HOT_MEM_LOCK = threading.Lock()
 _HOT_MEM: dict[str, tuple[float, object]] = {}
 _TOPICS_SCHED_STARTED = False
+
+
+def _wx_code_to_openid(code: str) -> str:
+    appid = str(os.environ.get("WECHAT_APPID") or "").strip()
+    appsecret = str(os.environ.get("WECHAT_APPSECRET") or "").strip()
+    if not appid or not appsecret:
+        raise RuntimeError("微信登录未配置（缺少 WECHAT_APPID/WECHAT_APPSECRET）")
+    c = str(code or "").strip()
+    if not c:
+        raise RuntimeError("缺少微信登录 code")
+    url = "https://api.weixin.qq.com/sns/jscode2session"
+    params = {
+        "appid": appid,
+        "secret": appsecret,
+        "js_code": c,
+        "grant_type": "authorization_code",
+    }
+    resp = requests.get(url, params=params, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("errcode"):
+        raise RuntimeError(f"微信登录失败：{data.get('errmsg') or data.get('errcode')}")
+    openid = str(data.get("openid") or "").strip()
+    if not openid:
+        raise RuntimeError("微信返回为空（openid 缺失）")
+    return openid
 
 
 def _hot_mem_get(key: str, ttl_s: float):
@@ -653,8 +681,30 @@ def news_home_enhanced():
         limit = _HOME_NEWS_LIMIT
     limit = max(1, min(20, limit))
     region = normalize_news_region_param(request.args.get("region"))
+    mode = str(request.args.get("mode", "all") or "all").strip().lower()
+    wl_raw = str(request.args.get("watchlist", "") or "").strip()
+    watchlist_codes = [x.strip() for x in wl_raw.split(",") if x and x.strip()]
+    if mode in ("personal", "watchlist", "personalized") and not watchlist_codes:
+        return jsonify(
+            {
+                "code": 200,
+                "msg": "success",
+                "data": {
+                    "update_time": _now_str(),
+                    "items": [],
+                    "source_count": 0,
+                    "region": region,
+                    "mode": mode,
+                },
+            }
+        )
     try:
-        items = generate_home_news_enhanced(limit=limit, region=region)
+        items = generate_home_news_enhanced(
+            limit=limit,
+            region=region,
+            mode=mode,
+            watchlist_codes=watchlist_codes,
+        )
         return jsonify({
             "code": 200,
             "msg": "success",
@@ -663,13 +713,68 @@ def news_home_enhanced():
                 "items": items,
                 "source_count": len(items),
                 "region": region,
+                "mode": mode,
             },
         })
     except Exception as e:
         return jsonify({"code": 500, "msg": f"获取增强首页新闻失败：{e}", "data": None})
 
 
+@app.route("/api/auth/wechat-login", methods=["POST"])
+def auth_wechat_login():
+    body = request.get_json(silent=True) or {}
+    code = str(body.get("code") or "").strip()
+    nickname = str(body.get("nickName") or "").strip()
+    avatar_url = str(body.get("avatarUrl") or "").strip()
+    if not code:
+        return jsonify({"code": 400, "msg": "缺少微信登录 code", "data": None})
+    try:
+        openid = _wx_code_to_openid(code)
+        user_id = upsert_wechat_user(openid, nickname, avatar_url)
+        return jsonify(
+            {
+                "code": 200,
+                "msg": "success",
+                "data": {
+                    "user_id": user_id,
+                    "openid_masked": (openid[:4] + "***" + openid[-4:]) if len(openid) >= 8 else "***",
+                },
+            }
+        )
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"微信登录失败：{e}", "data": None})
+
+
+@app.route("/api/user/watchlist", methods=["GET"])
+def get_user_watchlist():
+    user_id = str(request.args.get("user_id", "") or "").strip()
+    if not user_id:
+        return jsonify({"code": 400, "msg": "缺少 user_id", "data": None})
+    try:
+        codes = get_watchlist_codes(user_id)
+        return jsonify({"code": 200, "msg": "success", "data": {"codes": codes, "count": len(codes)}})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"读取自选失败：{e}", "data": None})
+
+
+@app.route("/api/user/watchlist", methods=["PUT"])
+def put_user_watchlist():
+    body = request.get_json(silent=True) or {}
+    user_id = str(body.get("user_id") or "").strip()
+    codes = body.get("codes") or []
+    if not user_id:
+        return jsonify({"code": 400, "msg": "缺少 user_id", "data": None})
+    if not isinstance(codes, list):
+        return jsonify({"code": 400, "msg": "codes 必须为数组", "data": None})
+    try:
+        saved = set_watchlist_codes(user_id, codes)
+        return jsonify({"code": 200, "msg": "success", "data": {"codes": saved, "count": len(saved)}})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"保存自选失败：{e}", "data": None})
+
+
 if __name__ == "__main__":
+    init_user_db()
     # 启动预热线程
     start_warmup_thread()
     

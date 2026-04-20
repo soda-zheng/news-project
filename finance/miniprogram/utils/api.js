@@ -95,6 +95,24 @@ function getHomeNews(page = 1, num) {
   return requestJson({ url, timeout: 120000 })
 }
 
+function postWeChatLogin(payload) {
+  return requestJson({ url: '/api/auth/wechat-login', method: 'POST', data: payload || {}, timeout: 45000 })
+}
+
+function getUserWatchlist(userId) {
+  const uid = encodeURIComponent(String(userId || '').trim())
+  return requestJson({ url: `/api/user/watchlist?user_id=${uid}`, timeout: 45000 })
+}
+
+function putUserWatchlist(userId, codes) {
+  return requestJson({
+    url: '/api/user/watchlist',
+    method: 'PUT',
+    data: { user_id: String(userId || '').trim(), codes: Array.isArray(codes) ? codes : [] },
+    timeout: 45000
+  })
+}
+
 function getQuote(symbol) {
   return requestJson({ url: `/api/stock?symbol=${encodeURIComponent(String(symbol || ''))}` })
 }
@@ -190,13 +208,21 @@ function getStockNews(symbol, limit = 10) {
   })
 }
 
-function getHomeNewsEnhanced(limit, region = 'all') {
+function getHomeNewsEnhanced(limit, region = 'all', mode = 'all', watchlistCodes = []) {
   let url = '/api/news/home-enhanced'
   if (limit != null && String(limit).trim() !== '') {
     url += `?limit=${encodeURIComponent(String(limit))}`
   }
   const r = String(region || 'all').trim()
   if (r && r !== 'all') url += `${url.includes('?') ? '&' : '?'}region=${encodeURIComponent(r)}`
+  const m = String(mode || 'all').trim()
+  if (m && m !== 'all') url += `${url.includes('?') ? '&' : '?'}mode=${encodeURIComponent(m)}`
+  const codes = Array.isArray(watchlistCodes)
+    ? watchlistCodes.map((x) => String(x || '').trim()).filter((x) => /^\d{6}$/.test(x))
+    : []
+  if (codes.length) {
+    url += `${url.includes('?') ? '&' : '?'}watchlist=${encodeURIComponent(codes.join(','))}`
+  }
   return requestJson({
     url,
     timeout: 1200000
@@ -221,6 +247,9 @@ module.exports = {
   explainBackendConnectionError,
   getHotTopics,
   getHomeNews,
+  postWeChatLogin,
+  getUserWatchlist,
+  putUserWatchlist,
   getQuote,
   searchStocks,
   getMarketAOverview,

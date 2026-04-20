@@ -231,6 +231,14 @@ page {
 .app-container.theme-dark .kline-placeholder {
   color: rgba(226, 232, 240, 0.62) !important;
 }
+.app-container.theme-dark .stock-watchlist-btn {
+  background: rgba(15, 47, 115, 0.5) !important;
+  color: rgba(226, 232, 240, 0.92) !important;
+}
+.app-container.theme-dark .stock-watchlist-btn.is-added {
+  background: rgba(51, 65, 85, 0.62) !important;
+  color: rgba(226, 232, 240, 0.82) !important;
+}
 .app-container.theme-dark .stock-suggest-row {
   border-bottom-color: rgba(148, 163, 184, 0.14) !important;
 }
@@ -1176,8 +1184,14 @@ page {
 .stock-name-row {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   margin-bottom: 16rpx;
+}
+
+.stock-name-meta {
+  min-width: 0;
+  flex: 1;
+  margin-right: 16rpx;
 }
 
 .stock-name-lg {
@@ -1189,6 +1203,22 @@ page {
 .stock-code-lg {
   font-size: 26rpx;
   color: #94a3b8;
+}
+
+.stock-watchlist-btn {
+  padding: 10rpx 24rpx;
+  border-radius: 999rpx;
+  background: #0f2f73;
+  color: #fff;
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+.stock-watchlist-btn.is-added {
+  background: #e2e8f0;
+  color: #475569;
 }
 
 .price-row {

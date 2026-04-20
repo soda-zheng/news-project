@@ -6,7 +6,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 import requests
 from utils.helpers import _now_str, _parse_symbol, _is_a_share_6digit, _to_float, _parse_sina_var
-from services.stock_service import _fetch_a_share_quote, _get_stock_daily_bars, _fetch_hot_node
+from services.stock_service import _fetch_a_share_quote, _get_stock_daily_bars, _fetch_hot_node, _get_a_share_search_index
 from services.news_service import _fetch_news_live, fetch_akshare_stock_news
 from services.llm_service import _invoke_llm_for_insight, _llm_repair_insight_json, _openai_compat_chat, _get_llm_env
 from utils.helpers import _safe_bullets, _extract_json_object
@@ -1695,14 +1695,162 @@ def ai_analyze_news(title: str, summary: str = "", url: str = "", source: str = 
     return result
 
 
-def generate_home_news_enhanced(limit: int = 10, region: str = "all"):
+def _parse_watchlist_codes(raw_codes) -> list[str]:
+    out = []
+    seen = set()
+    for x in raw_codes or []:
+        s = str(x or "").strip()
+        if len(s) == 6 and s.isdigit() and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+def _personalize_news_items(items: list[dict], watchlist_codes: list[str]) -> list[dict]:
+    codes = _parse_watchlist_codes(watchlist_codes)
+    if not codes:
+        return []
+    watch_set = set(codes)
+    out = []
+    for it in items or []:
+        chips = it.get("chips") or []
+        chip_codes = set()
+        for chip in chips:
+            s = str(chip or "")
+            m = re.search(r"(\d{6})\.(SH|SZ|BJ)\b", s, flags=re.IGNORECASE)
+            if m:
+                chip_codes.add(m.group(1))
+                continue
+            m2 = re.search(r"\b(\d{6})\b", s)
+            if m2:
+                chip_codes.add(m2.group(1))
+        # 直接命中自选，或同条新闻中出现了自选相关股票链（包含竞品/同板块 chips）
+        if chip_codes & watch_set:
+            row = dict(it)
+            row["personalReason"] = "自选相关"
+            out.append(row)
+    return out
+
+
+def _personalize_from_raw_news(raw_items: list[dict], watchlist_codes: list[str], limit: int) -> list[dict]:
+    codes = _parse_watchlist_codes(watchlist_codes)
+    if not codes:
+        return []
+    code_set = set(codes)
+    name_map = {}
+    try:
+        idx_items, _ = _get_a_share_search_index()
+        for it in idx_items or []:
+            c = str(it.get("code") or "").strip()
+            n = str(it.get("name") or "").strip()
+            if c and n and c in code_set:
+                name_map[c] = n
+    except Exception:
+        name_map = {}
+
+    out = []
+    seen_ids = set()
+    for i, item in enumerate(raw_items or []):
+        title = str(item.get("title") or "").strip()
+        summary = str(item.get("summary") or "").strip()
+        text = f"{title}\n{summary}"
+        matched = []
+        for code in codes:
+            nm = name_map.get(code, "")
+            if code in text or (nm and nm in text):
+                matched.append((code, nm or code))
+        if not matched:
+            continue
+        nid = str(item.get("id") or f"personal_{i}").strip() or f"personal_{i}"
+        if nid in seen_ids:
+            continue
+        seen_ids.add(nid)
+        chips = [f"{nm} {code}" for code, nm in matched]
+        out.append(
+            {
+                "id": nid,
+                "title": title,
+                "summary": f"🤖 AI摘要：{summary[:100] if summary else title[:100]}",
+                "metaTime": str(item.get("metaTime") or item.get("pub_time") or time.strftime("%Y-%m-%d %H:%M", time.localtime())),
+                "metaSource": f"来源：{str(item.get('source') or '').strip()}",
+                "chips": chips,
+                "heatPercentile": int(_to_float(item.get("importance"), 55) or 55),
+                "region": str(item.get("region") or "domestic"),
+                "url": str(item.get("url") or "").strip(),
+                "_analysis": None,
+                "personalReason": "自选直接相关",
+            }
+        )
+        if len(out) >= max(1, int(limit or 10)):
+            break
+    if out:
+        return out
+
+    # 二级兜底：若快讯没命中，改用“个股新闻源”补齐，避免首页个性化直接空白
+    try:
+        from services.news_service import fetch_akshare_stock_news
+    except Exception:
+        return out
+    for code in codes:
+        nm = name_map.get(code, code)
+        rows = fetch_akshare_stock_news(code, limit=4) or []
+        for j, item in enumerate(rows):
+            title = str(item.get("title") or "").strip()
+            summary = str(item.get("summary") or "").strip()
+            if not title:
+                continue
+            nid = str(item.get("id") or f"personal_stock_{code}_{j}").strip() or f"personal_stock_{code}_{j}"
+            if nid in seen_ids:
+                continue
+            seen_ids.add(nid)
+            out.append(
+                {
+                    "id": nid,
+                    "title": title,
+                    "summary": f"🤖 AI摘要：{summary[:100] if summary else title[:100]}",
+                    "metaTime": str(item.get("metaTime") or item.get("pub_time") or time.strftime("%Y-%m-%d %H:%M", time.localtime())),
+                    "metaSource": f"来源：{str(item.get('source') or '').strip()}",
+                    "chips": [f"{nm} {code}"],
+                    "heatPercentile": int(_to_float(item.get("importance"), 58) or 58),
+                    "region": str(item.get("region") or "domestic"),
+                    "url": str(item.get("url") or "").strip(),
+                    "_analysis": None,
+                    "personalReason": "自选个股新闻",
+                }
+            )
+            if len(out) >= max(1, int(limit or 10)):
+                return out
+    return out
+
+
+def generate_home_news_enhanced(
+    limit: int = 10,
+    region: str = "all",
+    mode: str = "all",
+    watchlist_codes: list[str] | None = None,
+):
     """
     增强版首页新闻：获取聚合新闻 + 对每条生成AI摘要/相关股票/关注度
     返回格式与前端 HOME_NEWS_SEED 一致；region: all | domestic | global
     """
     from services.news_service import get_news_summary, normalize_news_region_param
 
+    personal_mode = str(mode or "all").strip().lower() in ("personal", "watchlist", "personalized")
+    watchlist_codes = _parse_watchlist_codes(watchlist_codes or [])
+    if personal_mode and not watchlist_codes:
+        return []
+
     region = normalize_news_region_param(region)
+    if personal_mode:
+        # 个性化极速通道：避免先跑多源聚合（耗时高），直接用新浪滚动快讯做匹配
+        try:
+            from services.news_service import _fetch_news_live
+            fast_n = min(max(limit * 10, 40), 120)
+            fast_items = _fetch_news_live(page=1, num=fast_n) or []
+        except Exception:
+            fast_items = []
+        return _personalize_from_raw_news(fast_items, watchlist_codes, limit)
+
     if region == "all":
         # 「全部」要在合并前列表里混入国际稿，pool 略大
         pool_limit = min(max(limit * 4, 28), 50)
@@ -1711,6 +1859,10 @@ def generate_home_news_enhanced(limit: int = 10, region: str = "all"):
 
     raw = get_news_summary(limit=pool_limit, region=region)
     items = raw.get("items") or []
+    if personal_mode:
+        # 防御分支：理论上上方已 return
+        return _personalize_from_raw_news(items, watchlist_codes, limit)
+
     llm_env = _get_llm_env()
     llm_ready = bool(llm_env.get("api_base") and llm_env.get("model") and llm_env.get("api_key"))
     home_ai_enabled = _env_flag("HOME_NEWS_AI_ENABLED", True)
@@ -1722,8 +1874,19 @@ def generate_home_news_enhanced(limit: int = 10, region: str = "all"):
         max_ai_items = limit
     max_ai_items = max(0, min(limit, max_ai_items))
 
+    # 如果用户希望“没有关联股的剔除”，就只保留 AI 解析后 chips 非空的新闻。
+    # 为了让“剔除后还能换新的”，需要把最多分析条数放大一些（否则容易分析完也不够填满）。
     enhanced = []
-    for i, item in enumerate(items[:limit]):
+    ai_used = 0
+    if llm_ready:
+        if personal_mode:
+            # 个性化模式避免“长时间加载中”：限制分析样本，优先尽快返回
+            max_ai_items = min(pool_limit, max(max_ai_items, max(limit * 2, 12)))
+        else:
+            max_ai_items = min(pool_limit, max(max_ai_items, limit * 3))
+    for i, item in enumerate(items):
+        if len(enhanced) >= limit:
+            break
         title = item.get("title", "")
         summary = item.get("summary", "")
         url = item.get("url", "")
@@ -1731,7 +1894,7 @@ def generate_home_news_enhanced(limit: int = 10, region: str = "all"):
         reg = str(item.get("region") or "domestic")
 
         analysis = None
-        if llm_ready and i < max_ai_items:
+        if llm_ready and ai_used < max_ai_items:
             try:
                 analysis = ai_analyze_news(
                     title,
@@ -1741,36 +1904,50 @@ def generate_home_news_enhanced(limit: int = 10, region: str = "all"):
                     item.get("metaTime") or item.get("pub_time") or "",
                     item.get("ctime"),
                 )
+                ai_used += 1
             except Exception:
                 analysis = None
 
         if analysis:
-            enhanced.append({
-                "id": item.get("id", f"news_{i}"),
-                "title": title,
-                "summary": analysis.get("ai_summary", summary),
-                "metaTime": analysis.get("metaTime", ""),
-                "metaSource": analysis.get("metaSource", source),
-                "chips": analysis.get("chips", []),
-                "heatPercentile": analysis.get("heat_percentile", 60),
-                "region": reg,
-                "url": item.get("url", ""),
-                "_analysis": analysis,
-            })
+            chips = analysis.get("chips") or []
+            # 只保留能识别出关联股票的新闻
+            if len(chips) > 0:
+                enhanced.append(
+                    {
+                        "id": item.get("id", f"news_{i}"),
+                        "title": title,
+                        "summary": analysis.get("ai_summary", summary),
+                        "metaTime": analysis.get("metaTime", ""),
+                        "metaSource": analysis.get("metaSource", source),
+                        "chips": chips,
+                        "heatPercentile": analysis.get("heat_percentile", 60),
+                        "region": reg,
+                        "url": item.get("url", ""),
+                        "_analysis": analysis,
+                    }
+                )
         else:
-            enhanced.append({
-                "id": item.get("id", f"news_{i}"),
-                "title": title,
-                "summary": f"🤖 AI摘要：{summary[:100]}",
-                "metaTime": time.strftime("%Y-%m-%d %H:%M", time.localtime()),
-                "metaSource": f"来源：{source}",
-                "chips": [],
-                "heatPercentile": 50,
-                "region": reg,
-                "url": item.get("url", ""),
-                "_analysis": None,
-            })
+            # 如果没拿到 analysis：当 llm_ready 打开时直接跳过，避免出现“无关联股”的条目；
+            # 否则（AI 关闭）保留原行为（展示基础摘要）。
+            if not llm_ready:
+                enhanced.append(
+                    {
+                        "id": item.get("id", f"news_{i}"),
+                        "title": title,
+                        "summary": f"🤖 AI摘要：{summary[:100]}",
+                        "metaTime": time.strftime("%Y-%m-%d %H:%M", time.localtime()),
+                        "metaSource": f"来源：{source}",
+                        "chips": [],
+                        "heatPercentile": 50,
+                        "region": reg,
+                        "url": item.get("url", ""),
+                        "_analysis": None,
+                    }
+                )
 
+    if personal_mode:
+        picked = _personalize_news_items(enhanced, watchlist_codes)
+        return picked[:limit]
     return enhanced
 
 

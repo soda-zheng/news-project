@@ -79,6 +79,54 @@ function clearWeChatUserProfile() {
   } catch (e) {}
 }
 
+function wxLoginCode() {
+  return new Promise((resolve) => {
+    wx.login({
+      success: (res) => resolve((res && res.code) || ''),
+      fail: () => resolve(''),
+    })
+  })
+}
+
+/** 尝试绑定后端账号（openid）；失败时回退 localUserId，保证流程可用 */
+async function ensureBackendUserId() {
+  const prev = getLoginMeta() || {}
+  if (prev.cloudUserId) return prev.cloudUserId
+  const localUserId = ensureLocalUserId()
+  const code = await wxLoginCode()
+  if (!code) return localUserId
+  let api = null
+  try {
+    // eslint-disable-next-line global-require
+    api = require('./api')
+  } catch (e) {
+    return localUserId
+  }
+  if (!api || typeof api.postWeChatLogin !== 'function') return localUserId
+  try {
+    const user = getStoredUser() || {}
+    const res = await api.postWeChatLogin({
+      code,
+      nickName: String(user.nickName || ''),
+      avatarUrl: String(user.avatarUrl || ''),
+      localUserId,
+    })
+    const uid = res && res.code === 200 && res.data ? String(res.data.user_id || '').trim() : ''
+    if (!uid) return localUserId
+    setLoginMeta({
+      ...prev,
+      localUserId,
+      cloudUserId: uid,
+      openidMasked: (res.data && res.data.openid_masked) || '',
+      loginVia: 'wechat_code',
+      lastLoginAt: Date.now(),
+    })
+    return uid
+  } catch (e) {
+    return localUserId
+  }
+}
+
 module.exports = {
   getStoredUser,
   setStoredUser,
@@ -88,4 +136,5 @@ module.exports = {
   ensureLocalUserId,
   applyWeChatUserProfile,
   clearWeChatUserProfile,
+  ensureBackendUserId,
 }
