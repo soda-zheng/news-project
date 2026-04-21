@@ -1471,6 +1471,98 @@ def get_task(task_id: str):
     return t
 
 
+_NEWS_GENERIC_PHRASES = (
+    "市场对该事件的初步反应将体现在",
+    "与新闻主题直接相关的板块或个股可能获得短期关注",
+    "若事件发展不及预期",
+    "与主题相关的标的可能获得关注",
+    "若不及预期则可能回调",
+    "投资逻辑需结合后续市场数据进一步验证",
+)
+
+
+def _normalize_news_analysis_obj(obj: dict) -> dict:
+    """统一 LLM 返回字段命名，避免 snake/camel 不一致触发兜底模板。"""
+    if not isinstance(obj, dict):
+        return {}
+    out = dict(obj)
+    if "causalChain" not in out and isinstance(out.get("causal_chain"), list):
+        out["causalChain"] = out.get("causal_chain")
+    if "risk_if_wrong" not in out and out.get("riskIfWrong"):
+        out["risk_if_wrong"] = out.get("riskIfWrong")
+    if "ai_summary" not in out and out.get("aiSummary"):
+        out["ai_summary"] = out.get("aiSummary")
+    if "heat_percentile" not in out and out.get("heatPercentile") is not None:
+        out["heat_percentile"] = out.get("heatPercentile")
+    return out
+
+
+def _collect_news_fact_anchors(title: str, summary: str) -> list[str]:
+    """提取可检验事实锚点：日期、数字+单位、引号短语。"""
+    src = f"{title}\n{summary}"
+    anchors: list[str] = []
+    seen = set()
+    patterns = [
+        r"(20\d{2}[./-]\d{1,2}[./-]\d{1,2})",
+        r"(\d{1,2}月\d{1,2}日)",
+        r"(\d+(?:\.\d+)?(?:%|亿元|亿|万|家|条|倍|万吨|亿美元|万元|元))",
+        r"[“\"]([^”\"]{2,20})[”\"]",
+    ]
+    for p in patterns:
+        for m in re.findall(p, src):
+            s = str(m).strip()
+            if not s or s in seen:
+                continue
+            seen.add(s)
+            anchors.append(s)
+            if len(anchors) >= 10:
+                return anchors
+    return anchors
+
+
+def _news_analysis_generic_score(obj: dict, title: str, summary: str) -> int:
+    """分数越高越模板化。"""
+    score = 0
+    chain = obj.get("causalChain") if isinstance(obj.get("causalChain"), list) else []
+    chain_texts = []
+    for row in chain:
+        if not isinstance(row, dict):
+            continue
+        chain_texts.append(str(row.get("text") or "").strip())
+
+    text_blob = "\n".join(
+        [
+            str(obj.get("drive") or ""),
+            str(obj.get("logic") or ""),
+            str(obj.get("risk_if_wrong") or ""),
+            *chain_texts,
+        ]
+    )
+
+    generic_hits = sum(1 for p in _NEWS_GENERIC_PHRASES if p and p in text_blob)
+    if generic_hits >= 2:
+        score += 2
+    if len({t for t in chain_texts if t}) <= 2:
+        score += 1
+
+    # “可能受益/可能承压”必须写成“候选 + 依据”，否则视为泛化。
+    by_label = {}
+    for row in chain:
+        if isinstance(row, dict):
+            by_label[str(row.get("label") or "").strip()] = str(row.get("text") or "").strip()
+    for k in ("可能受益", "可能承压"):
+        t = by_label.get(k, "")
+        if t and ("候选" not in t or "依据" not in t):
+            score += 1
+
+    anchors = _collect_news_fact_anchors(title, summary)
+    if anchors:
+        hit_cnt = sum(1 for a in anchors if a and a in text_blob)
+        if hit_cnt < min(2, len(anchors)):
+            score += 1
+    return score
+
+
 def ai_analyze_news(title: str, summary: str = "", url: str = "", source: str = "", published_time=None, published_ts=None):
     """
     对单条新闻做AI深度分析，返回完整的话题详情结构（与前端 topicDataMap 格式一致）
@@ -1501,6 +1593,10 @@ def ai_analyze_news(title: str, summary: str = "", url: str = "", source: str = 
         "- change和positive要根据当前市场环境合理估算"
         "- causal_chain每步text不超过80字"
         "- 所有内容基于给定新闻，不要编造未提及的事件"
+        "- 必须至少引用2个来自原文的事实锚点（如日期、数值、主体名称）"
+        "- causal_chain 中 '可能受益' 与 '可能承压' 必须写成“候选：...；依据：...”格式"
+        "- 禁止空泛套话（如“可能获得关注/不及预期回调”单独成句）"
+        "- 证据不足时明确写“信息不足，需补充xx数据”，不要硬编"
     )
 
     user_msg = {
@@ -1521,15 +1617,34 @@ def ai_analyze_news(title: str, summary: str = "", url: str = "", source: str = 
     obj = None
     try:
         content = _openai_compat_chat(messages, max_tokens=1800, temperature=0.35)
-        obj = _extract_json_object(content)
+        obj = _normalize_news_analysis_obj(_extract_json_object(content) or {})
 
         if not obj:
             fixed = _llm_repair_insight_json(content)
             if isinstance(fixed, dict):
-                obj = fixed
+                obj = _normalize_news_analysis_obj(fixed)
 
         if not obj:
             raise RuntimeError("LLM 无法生成有效的新闻分析 JSON")
+
+        # 反模板检查：模板分高时进行一次强约束重写
+        if _news_analysis_generic_score(obj, title, summary) >= 2:
+            rewrite_messages = messages + [
+                {"role": "assistant", "content": str(obj)[:7000]},
+                {
+                    "role": "user",
+                    "content": (
+                        "上一个版本模板化严重，请重写并只输出 JSON："
+                        "1) 必须引用至少2个原文事实锚点；"
+                        "2) “可能受益/可能承压”必须是“候选：...；依据：...”"
+                        "3) 不得出现“可能获得关注/不及预期回调”这类空泛句。"
+                    ),
+                },
+            ]
+            content2 = _openai_compat_chat(rewrite_messages, max_tokens=1800, temperature=0.25)
+            obj2 = _normalize_news_analysis_obj(_extract_json_object(content2) or {})
+            if obj2 and _news_analysis_generic_score(obj2, title, summary) <= _news_analysis_generic_score(obj, title, summary):
+                obj = obj2
     except Exception as e:
         # LLM 失败时使用规则生成 fallback
         obj = None
@@ -1640,8 +1755,8 @@ def ai_analyze_news(title: str, summary: str = "", url: str = "", source: str = 
             "causalChain": obj.get("causalChain") or [
                 {"label": "事件", "text": title[:60]},
                 {"label": "影响路径", "text": "市场对该事件的初步反应将体现在相关标的价格波动上。"},
-                {"label": "可能受益", "text": "与新闻主题直接相关的板块或个股可能获得短期关注。"},
-                {"label": "可能承压", "text": "若事件发展不及预期，相关标的可能面临回调压力。"}
+                {"label": "可能受益", "text": "候选：与该事件直接相关的上游/中游链条；依据：原文事件若推动需求或政策倾斜，相关环节优先受益。"},
+                {"label": "可能承压", "text": "候选：受替代/成本挤压的对手方；依据：若原文触发条件未兑现或执行节奏放缓，相关标的承压。"}
             ],
             "counterRisk": {
                 "title": "若情况相反会怎样",
@@ -1670,8 +1785,8 @@ def ai_analyze_news(title: str, summary: str = "", url: str = "", source: str = 
             "causalChain": [
                 {"label": "事件", "text": title[:60]},
                 {"label": "影响路径", "text": "市场对该事件的初步反应将体现在价格波动上。"},
-                {"label": "可能受益", "text": "与主题相关的标的可能获得关注。"},
-                {"label": "可能承压", "text": "若不及预期则可能回调。"}
+                {"label": "可能受益", "text": "候选：与事件主题直接相关的行业链条；依据：事件若持续发酵，相关资产关注度提升。"},
+                {"label": "可能承压", "text": "候选：与事件方向相反或受替代影响的标的；依据：若关键条件未兑现，估值回撤风险上升。"}
             ],
             "counterRisk": {"title": "若情况相反会怎样", "points": ["需重新评估投资逻辑"]},
             "riskIfWrong": "若事态发展与预期相反，需重新评估。",
