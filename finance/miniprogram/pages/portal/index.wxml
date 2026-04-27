@@ -415,20 +415,140 @@
   </view>
 
   <view class="page {{activePage === 'earnings' ? 'active-page' : ''}}">
-    <view class="section-title">📄 AI 财报尽调</view>
-    <view class="upload-area" bindtap="onUploadAreaTap">
-      <view class="upload-icon">📂</view>
-      <view>点击上传财报文件</view>
-      <view class="text-small">支持 PDF（小程序内从聊天选择文件；完整解析可对接后端）</view>
+    <view class="er-header">
+      <text class="er-header-icon">⭐</text>
+      <text class="er-header-title">AI 文档尽调</text>
     </view>
-    <view wx:if="{{earningsVisible}}" class="analysis-result">
-      <view class="earnings-section-title">📋 财报任务状态</view>
-      <view class="text-small earnings-file-line" wx:if="{{earningsFileName}}">📄 文件：{{earningsFileName}}</view>
-      <view class="text-small earnings-file-line" wx:if="{{earningsTaskStatus}}">状态：{{earningsTaskStatus}} {{earningsStage}}</view>
-      <view class="text-small earnings-file-line" wx:if="{{earningsLoading}}">处理中，请稍候...</view>
+    <view class="er-scene-tabs">
+      <view
+        wx:for="{{earningsSceneTabs}}"
+        wx:key="key"
+        class="er-scene-tab {{earningsScene===item.key ? 'active' : ''}}"
+        data-key="{{item.key}}"
+        bindtap="onEarningsSceneTap"
+      >{{item.label}}</view>
+    </view>
 
-      <view class="earnings-section-title earnings-ai-title">🤖 AI 综合解读</view>
-      <view class="earnings-analysis-block">{{earningsHtml || '等待解析结果...'}}</view>
+    <view class="er-card er-search-card" wx:if="{{earningsScene === 'finance'}}">
+      <view class="er-search-box">
+        <input
+          class="er-search-input"
+          placeholder="输入公司名/代码，如 贵州茅台 或 600519"
+          value="{{earningsKeyword}}"
+          bindinput="onEarningsKeywordInput"
+          bindfocus="onEarningsSearchFocus"
+          bindblur="onEarningsSearchBlur"
+          confirm-type="search"
+          bindconfirm="onEarningsSearchTap"
+        />
+        <view class="er-search-btn" bindtap="onEarningsSearchTap">🔍</view>
+      </view>
+      <view class="er-suggest-list" wx:if="{{earningsSuggestVisible && earningsSuggestList.length}}">
+        <view
+          class="er-suggest-item"
+          wx:for="{{earningsSuggestList}}"
+          wx:key="code"
+          data-code="{{item.code}}"
+          bindtap="onEarningsSuggestPick"
+        >
+          <text class="er-suggest-code">{{item.code}}</text>
+          <text class="er-suggest-tag">{{item.type==='HK' ? '港股' : 'A股'}}</text>
+          <text class="er-suggest-name">{{item.name}}</text>
+        </view>
+      </view>
+      <view class="er-filter-tags">
+        <view
+          wx:for="{{earningsTypeTabs}}"
+          wx:key="key"
+          class="er-filter-tag {{earningsActiveType===item.key ? 'active' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="onEarningsTypeTap"
+        >{{item.label}}</view>
+      </view>
+    </view>
+
+    <view class="er-card er-selected-card" wx:if="{{earningsScene === 'research'}}">
+      <view class="er-selected-title">研报观点深挖（MVP）</view>
+      <view class="er-selected-info">
+        无需手动上传，系统将基于你在「财报尽调」中已选择的报告，自动生成结构化观点与风险提示。<text>\n</text>
+        输出内容包括：核心结论、关键财务数据、风险提示与验证要点。
+      </view>
+      <view class="er-ai-btn" bindtap="onRunResearchFromSelected">一键生成研报观点</view>
+      <view class="text-small earnings-file-line" wx:if="{{earningsTaskStatus}}">状态：{{earningsStatusText || (earningsTaskStatus + ' ' + earningsStage)}}</view>
+      <view class="text-small" wx:if="{{earningsLoading}}">正在生成研报观点，请稍候…</view>
+      <view class="earnings-analysis-block" wx:if="{{earningsHtml}}">{{earningsHtml}}</view>
+      <view class="earnings-faq-block" wx:if="{{earningsPages.length}}">
+        <view class="earnings-faq-title">逐题解析</view>
+        <view class="earnings-pager-meta">
+          <text class="earnings-pager-tip">第 <text class="earnings-pager-num">{{earningsPageIndex + 1}}</text> / <text class="earnings-pager-num">{{earningsPages.length}}</text> 题</text>
+          <view class="earnings-edit-btn" bindtap="openEarningsEdit">编辑本题</view>
+        </view>
+        <view class="earnings-analysis-content">
+          <block wx:for="{{earningsPageBlocks}}" wx:key="index">
+            <view wx:if="{{item.type === 'h3'}}" class="earnings-ac-h3">{{item.text}}</view>
+            <view wx:if="{{item.type === 'sec'}}" class="earnings-ac-sec">{{item.text}}</view>
+            <view
+              wx:if="{{item.type === 'p'}}"
+              class="earnings-ac-p {{(index > 0 && earningsPageBlocks[index-1].type === 'sec' && earningsPageBlocks[index-1].text === '核心结论：') ? 'earnings-core-box' : ''}}"
+            >{{item.text}}</view>
+            <view wx:if="{{item.type === 'ul'}}" class="earnings-ac-ul">
+              <view class="earnings-ac-li" wx:for="{{item.items}}" wx:for-item="li" wx:key="*this">{{li}}</view>
+            </view>
+          </block>
+        </view>
+        <view class="earnings-pager-row">
+          <view class="earnings-pager-btn {{earningsPageIndex <= 0 ? 'disabled' : ''}}" bindtap="onEarningsPagePrev">← 上一题</view>
+          <view class="earnings-pager-btn {{earningsPageIndex >= earningsPages.length - 1 ? 'disabled' : ''}}" bindtap="onEarningsPageNext">下一题 →</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="er-card er-list-card" wx:if="{{earningsScene === 'finance'}}">
+      <view wx:if="{{!earningsReportList.length}}" class="text-small">暂无匹配财报，请换个关键词。</view>
+      <view
+        wx:for="{{earningsReportList}}"
+        wx:key="id"
+        class="er-report-item {{earningsSelectedId===item.id ? 'selected' : ''}}"
+        data-id="{{item.id}}"
+        bindtap="onPickEarningsReport"
+      >
+        <view class="er-report-head">
+          <view class="er-report-name">{{item.name}}（{{item.symbol}}）</view>
+          <view class="er-report-head-right">
+            <view class="er-period-tag">{{item.periodLabel}}{{item.isSummary ? '·摘要' : ''}}</view>
+            <view wx:if="{{earningsSelectedId===item.id}}" class="er-selected-tag">已选</view>
+          </view>
+        </view>
+        <view class="er-report-desc">
+          <text>{{item.title}}</text>
+        </view>
+        <view class="er-report-desc">
+          <text>发布：{{item.publish_time}}</text>
+          <text>{{item.adjunct_size || '--'}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="er-card er-selected-card" wx:if="{{earningsScene === 'finance' && earningsSelected}}">
+      <view class="er-selected-title">已选财报：{{earningsSelected.name}}（{{earningsSelected.symbol}}）</view>
+      <view class="er-selected-info">
+        {{earningsSelected.periodLabel}}{{earningsSelected.isSummary ? ' · 摘要' : ''}}<text>\n</text>
+        {{earningsSelected.title}}<text>\n</text>
+        发布时间：{{earningsSelected.publish_time}}
+      </view>
+      <view class="er-pdf-btn" bindtap="onOpenStockNews" data-url="{{earningsSelected.pdf_url || earningsSelected.doc_url}}">查看财报原文</view>
+      <view
+        class="er-dl-btn"
+        bindtap="onDownloadEarningsPdf"
+        data-url="{{earningsSelected.pdf_url || earningsSelected.doc_url}}"
+        data-title="{{earningsSelected.title}}"
+        data-symbol="{{earningsSelected.symbol}}"
+        data-period="{{earningsSelected.periodLabel}}"
+      >下载文档到本地</view>
+      <view class="er-ai-btn" bindtap="onRunEarningsQuickAnalyze">一键 AI 解读</view>
+      <view class="text-small earnings-file-line" wx:if="{{earningsTaskStatus}}">状态：{{earningsStatusText || (earningsTaskStatus + ' ' + earningsStage)}}</view>
+      <view class="text-small" wx:if="{{earningsLoading}}">正在生成分析，请稍候…</view>
+      <view class="earnings-analysis-block" wx:if="{{earningsHtml}}">{{earningsHtml}}</view>
 
       <view class="earnings-faq-block" wx:if="{{earningsPages.length}}">
         <view class="earnings-faq-title">逐题解析</view>
@@ -471,7 +591,7 @@
       <picker mode="selector" range="{{earningsFactChoices}}" value="{{earningsEditChoiceIndex}}" bindchange="onEarningsEditChoiceChange">
         <view class="earnings-edit-picker">{{earningsFactChoices.length ? (earningsFactChoices[earningsEditChoiceIndex] || '选择一个数据点') : '暂无数据点（先生成解析）'}}</view>
       </picker>
-      <view class="earnings-edit-hint text-small">仅选数据点、不填上方问题时，会自动生成一道分析问句（不再把「指标｜数值｜页码」当标题）。</view>
+      <view class="earnings-edit-hint text-small">仅选数据点、不填上方问题时，会自动生成一道分析问句。</view>
       <view class="earnings-edit-actions">
         <view class="earnings-edit-btn2 cancel" bindtap="closeEarningsEdit">取消</view>
         <view class="earnings-edit-btn2 ok {{earningsEditBusy ? 'disabled' : ''}}" bindtap="saveEarningsEdit">保存并重算</view>

@@ -2,29 +2,62 @@
   <view class="topbar">
     <view class="topbar-left">
       <text class="top-title">财报分析</text>
-      <text class="top-sub">结构化解读 · 简约呈现</text>
+      <text class="top-sub">站内选财报 · 一键AI解读</text>
     </view>
-    <text class="pill">演示版</text>
+    <text class="pill">新版</text>
   </view>
 
   <view class="container">
     <view class="card">
-      <view class="section-title">你将获得什么</view>
-      <view class="line" wx:for="{{reportTips}}" wx:key="*this">- {{item}}</view>
-      <view class="btn-ghost" bindtap="choosePdf">{{fileInfo ? '重新上传PDF' : '上传财报PDF'}}</view>
-      <view class="btn-ghost" bindtap="runAnalyze">开始分析</view>
-      <view class="muted" wx:if="{{fileInfo}}">已上传：{{fileInfo.name}}</view>
-      <view class="muted" wx:if="{{taskStatus}}">任务状态：{{taskStatus}} {{stage}}</view>
-      <view class="line" wx:if="{{resultText}}">{{resultText}}</view>
-      <view class="muted" wx:if="{{loading}}">处理中，请稍候...</view>
+      <view class="section-title">1. 选择要分析的财报</view>
+      <input
+        class="search-input"
+        value="{{keyword}}"
+        placeholder="输入公司名/代码，如 宁德时代 或 300750"
+        bindinput="onKeywordInput"
+      />
+      <view class="tabs-row">
+        <view
+          wx:for="{{typeTabs}}"
+          wx:key="key"
+          class="tab-chip {{activeType===item.key ? 'active' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="onTypeTap"
+        >{{item.label}}</view>
+      </view>
+      <view wx:if="{{reportList.length===0}}" class="muted">暂无匹配财报，请换个关键词。</view>
+      <view
+        wx:for="{{reportList}}"
+        wx:key="id"
+        class="report-row {{selectedId===item.id ? 'selected' : ''}}"
+        data-id="{{item.id}}"
+        bindtap="onPickReport"
+      >
+        <view class="report-row-top">
+          <text class="report-name">{{item.name}}（{{item.symbol}}）</text>
+          <text class="report-date">{{item.publishDate}}</text>
+        </view>
+        <view class="report-period">{{item.period}}</view>
+        <view class="metrics">
+          <text class="metric">营收同比 {{item.revenueYoY}}%</text>
+          <text class="metric">利润同比 {{item.profitYoY}}%</text>
+          <text class="metric">毛利率 {{item.grossMargin}}%</text>
+        </view>
+      </view>
     </view>
 
-    <view class="card">
-      <view class="section-title">下一步（可选）</view>
-      <view class="muted">等你确定要接后端时，我会把小程序的上传与任务轮询写好，对应 demo2 的：</view>
-      <view class="muted">- /api/upload</view>
-      <view class="muted">- /api/analyze</view>
-      <view class="muted">- /api/tasks/:taskId</view>
+    <view class="card" wx:if="{{selectedReport}}">
+      <view class="section-title">2. 财报详情</view>
+      <view class="line">公司：{{selectedReport.name}}（{{selectedReport.symbol}}）</view>
+      <view class="line">期别：{{selectedReport.period}} ｜ 发布时间：{{selectedReport.publishDate}}</view>
+      <view class="line">经营现金流同比：{{selectedReport.cfoYoY}}%</view>
+      <view class="line">核心看点：</view>
+      <view class="muted bullet" wx:for="{{selectedReport.highlights}}" wx:key="*this">- {{item}}</view>
+      <view class="line">主要风险：</view>
+      <view class="muted bullet" wx:for="{{selectedReport.risks}}" wx:key="*this">- {{item}}</view>
+      <view class="btn-ghost" bindtap="runAnalyze">一键 AI 解读</view>
+      <view class="muted" wx:if="{{loading}}">分析中，请稍候...</view>
+      <view class="result-box" wx:if="{{aiSummary}}">{{aiSummary}}</view>
     </view>
   </view>
 </view>

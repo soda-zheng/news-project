@@ -5,6 +5,7 @@ import threading
 import time
 import traceback
 import requests
+from urllib.parse import quote, urlparse
 
 # 本地开发：backend/.env 中可配置 LLM_API_BASE / LLM_MODEL / LLM_API_KEY
 try:
@@ -14,7 +15,7 @@ try:
 except ImportError:
     pass
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 
 # 导入服务模块
 from services.news_service import (
@@ -40,7 +41,10 @@ from services.market_service import (
     generate_home_news_enhanced,
     start_warmup_thread,
 )
-from services.report_service import upload_file, create_task, get_task, regen_page
+from services.report_service import upload_file, create_task, get_task, regen_page, create_session_from_pdf_url
+from services.cninfo_service import fetch_cninfo_reports, fetch_cninfo_suggest
+from services.us_report_service import fetch_us_reports
+from services.report_brief_service import generate_report_brief
 from services.user_store import init_user_db, upsert_wechat_user, get_watchlist_codes, set_watchlist_codes
 from utils.helpers import (
     _now_str,
@@ -489,6 +493,174 @@ def research_analyze():
         return jsonify({"code": 500, "msg": str(e), "data": None})
 
 
+@app.route("/api/report/cninfo-list", methods=["GET"])
+def report_cninfo_list():
+    stock = str(request.args.get("stock", "") or "").strip()
+    searchkey = str(request.args.get("searchkey", "") or "").strip()
+    report_type = str(request.args.get("reportType", "all") or "all").strip().lower()
+    column = str(request.args.get("column", "") or "").strip().lower()
+    se_date = str(request.args.get("seDate", "") or "").strip()
+    try:
+        page_num = int(request.args.get("pageNum", "1") or "1")
+    except Exception:
+        page_num = 1
+    try:
+        page_size = int(request.args.get("pageSize", "20") or "20")
+    except Exception:
+        page_size = 20
+    try:
+        data = fetch_cninfo_reports(
+            stock=stock,
+            searchkey=searchkey,
+            report_type=report_type,
+            page_num=page_num,
+            page_size=page_size,
+            se_date=se_date,
+            column=column,
+        )
+        return jsonify({"code": 200, "msg": "success", "data": data})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"获取巨潮财报列表失败：{e}", "data": None})
+
+
+@app.route("/api/report/search-suggest", methods=["GET"])
+def report_search_suggest():
+    keyword = str(request.args.get("keyword", "") or "").strip()
+    try:
+        limit = int(request.args.get("limit", "12") or "12")
+    except Exception:
+        limit = 12
+    if not keyword:
+        return jsonify({"code": 200, "msg": "success", "data": []})
+    try:
+        data = fetch_cninfo_suggest(keyword, limit=limit)
+        return jsonify({"code": 200, "msg": "success", "data": data})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"获取联想列表失败：{e}", "data": []})
+
+
+@app.route("/api/report/us-list", methods=["GET"])
+def report_us_list():
+    ticker = str(request.args.get("ticker", "") or "").strip()
+    report_type = str(request.args.get("reportType", "all") or "all").strip().lower()
+    try:
+        page_num = int(request.args.get("pageNum", "1") or "1")
+    except Exception:
+        page_num = 1
+    try:
+        page_size = int(request.args.get("pageSize", "20") or "20")
+    except Exception:
+        page_size = 20
+    try:
+        data = fetch_us_reports(
+            ticker=ticker,
+            report_type=report_type,
+            page_num=page_num,
+            page_size=page_size,
+        )
+        return jsonify({"code": 200, "msg": "success", "data": data})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"获取美股财报列表失败：{e}", "data": None})
+
+
+@app.route("/api/report/download-pdf", methods=["GET"])
+def report_download_pdf():
+    pdf_url = str(request.args.get("pdfUrl", "") or "").strip()
+    title = str(request.args.get("title", "") or "").strip()
+    symbol = str(request.args.get("symbol", "") or "").strip()
+    period = str(request.args.get("period", "") or "").strip()
+    if not pdf_url:
+        return jsonify({"code": 400, "msg": "缺少 pdfUrl 参数", "data": None}), 400
+    try:
+        u = urlparse(pdf_url)
+        host = str(u.netloc or "").lower()
+        if host not in {"static.cninfo.com.cn", "www.cninfo.com.cn", "cninfo.com.cn", "sec.gov", "www.sec.gov"}:
+            return jsonify({"code": 400, "msg": "仅支持巨潮或SEC文档下载", "data": None}), 400
+
+        fallback_name = "财报.pdf"
+        if symbol or title or period:
+            parts = [x for x in [symbol, title or period] if str(x or "").strip()]
+            ext = ".pdf"
+            path_lower = str(u.path or "").lower()
+            if path_lower.endswith(".htm") or path_lower.endswith(".html"):
+                ext = ".html"
+            elif path_lower.endswith(".txt"):
+                ext = ".txt"
+            fallback_name = "_".join(parts) + ext
+
+        safe_name = (
+            fallback_name.replace("/", "_")
+            .replace("\\", "_")
+            .replace(":", "_")
+            .replace("*", "_")
+            .replace("?", "_")
+            .replace('"', "_")
+            .replace("<", "_")
+            .replace(">", "_")
+            .replace("|", "_")
+        )
+        rr = requests.get(
+            pdf_url,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Referer": "https://www.cninfo.com.cn/" if "cninfo" in host else "https://www.sec.gov/",
+            },
+            timeout=30,
+        )
+        rr.raise_for_status()
+        mime = rr.headers.get("Content-Type") or "application/octet-stream"
+        resp = Response(rr.content, mimetype=mime.split(";")[0].strip())
+        disp = f"attachment; filename*=UTF-8''{quote(safe_name)}"
+        resp.headers["Content-Disposition"] = disp
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"下载财报失败：{e}", "data": None}), 500
+
+
+@app.route("/api/report/ai-brief", methods=["POST", "OPTIONS"])
+def report_ai_brief():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    body = request.get_json(silent=True) or {}
+    company = str(body.get("company") or "").strip()
+    symbol = str(body.get("symbol") or "").strip()
+    title = str(body.get("title") or "").strip()
+    publish_time = str(body.get("publishTime") or "").strip()
+    pdf_url = str(body.get("pdfUrl") or "").strip()
+    period_label = str(body.get("periodLabel") or "").strip()
+    if not company or not title:
+        return jsonify({"code": 400, "msg": "缺少 company/title 参数", "data": None})
+    try:
+        text = generate_report_brief(
+            company=company,
+            symbol=symbol,
+            title=title,
+            publish_time=publish_time,
+            pdf_url=pdf_url,
+            period_label=period_label,
+        )
+        return jsonify({"code": 200, "msg": "success", "data": {"summary": text}})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"财报AI解读失败：{e}", "data": None})
+
+
+@app.route("/api/report/prepare-from-url", methods=["POST", "OPTIONS"])
+def report_prepare_from_url():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    body = request.get_json(silent=True) or {}
+    pdf_url = str(body.get("pdfUrl") or "").strip()
+    file_name = str(body.get("fileName") or "").strip()
+    if not pdf_url:
+        return jsonify({"code": 400, "msg": "缺少 pdfUrl 参数", "data": None})
+    try:
+        out = create_session_from_pdf_url(pdf_url, file_name)
+        return jsonify({"code": 200, "msg": "success", "data": out})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"准备财报会话失败：{e}", "data": None})
+
+
 @app.route("/api/upload", methods=["POST", "OPTIONS"])
 def upload():
     if request.method == "OPTIONS":
@@ -508,7 +680,8 @@ def analyze():
         return ("", 204)
     body = request.get_json(silent=True) or {}
     session_id = str(body.get("sessionId") or "").strip()
-    result = create_task(session_id)
+    analyze_type = str(body.get("analyzeType") or "finance").strip().lower()
+    result = create_task(session_id, analyze_type=analyze_type)
     if not result:
         return jsonify({"error": "session not found"}), 404
     return jsonify(result)

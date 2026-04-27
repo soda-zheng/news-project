@@ -149,6 +149,76 @@ function postResearchAnalyze(payload) {
   return requestJson({ url: '/api/research/analyze', method: 'POST', data: payload || {}, timeout: 90000 })
 }
 
+function getCninfoReportList({
+  stock = '',
+  searchkey = '',
+  reportType = 'all',
+  column = '',
+  pageNum = 1,
+  pageSize = 20,
+  seDate = ''
+} = {}) {
+  let url =
+    `/api/report/cninfo-list?stock=${encodeURIComponent(String(stock || '').trim())}` +
+    `&searchkey=${encodeURIComponent(String(searchkey || '').trim())}` +
+    `&reportType=${encodeURIComponent(String(reportType || 'all').trim())}` +
+    `&column=${encodeURIComponent(String(column || '').trim())}` +
+    `&pageNum=${encodeURIComponent(String(pageNum || 1))}` +
+    `&pageSize=${encodeURIComponent(String(pageSize || 20))}`
+  if (seDate) url += `&seDate=${encodeURIComponent(String(seDate).trim())}`
+  return requestJson({ url, timeout: 90000 })
+}
+
+function getUsReportList({
+  ticker = '',
+  reportType = 'all',
+  pageNum = 1,
+  pageSize = 20
+} = {}) {
+  const url =
+    `/api/report/us-list?ticker=${encodeURIComponent(String(ticker || '').trim().toUpperCase())}` +
+    `&reportType=${encodeURIComponent(String(reportType || 'all').trim())}` +
+    `&pageNum=${encodeURIComponent(String(pageNum || 1))}` +
+    `&pageSize=${encodeURIComponent(String(pageSize || 20))}`
+  return requestJson({ url, timeout: 90000 })
+}
+
+function getReportSearchSuggest(keyword, limit = 12) {
+  return requestJson({
+    url:
+      `/api/report/search-suggest?keyword=${encodeURIComponent(String(keyword || '').trim())}` +
+      `&limit=${encodeURIComponent(String(limit || 12))}`,
+    timeout: 30000
+  })
+}
+
+function buildReportDownloadUrl({ pdfUrl = '', title = '', symbol = '', period = '' } = {}) {
+  return makeUrl(
+    `/api/report/download-pdf?pdfUrl=${encodeURIComponent(String(pdfUrl || '').trim())}` +
+      `&title=${encodeURIComponent(String(title || '').trim())}` +
+      `&symbol=${encodeURIComponent(String(symbol || '').trim())}` +
+      `&period=${encodeURIComponent(String(period || '').trim())}`
+  )
+}
+
+function postReportAiBrief(payload) {
+  return requestJson({
+    url: '/api/report/ai-brief',
+    method: 'POST',
+    data: payload || {},
+    timeout: 120000
+  })
+}
+
+function postPrepareReportFromUrl(payload) {
+  return requestJson({
+    url: '/api/report/prepare-from-url',
+    method: 'POST',
+    data: payload || {},
+    timeout: 90000
+  })
+}
+
 function uploadPdf(filePath, name = 'report.pdf') {
   return new Promise((resolve, reject) => {
     wx.uploadFile({
@@ -180,8 +250,13 @@ function uploadPdf(filePath, name = 'report.pdf') {
   })
 }
 
-function startAnalyze(sessionId) {
-  return requestJson({ url: '/api/analyze', method: 'POST', data: { sessionId }, timeout: 30000 })
+function startAnalyze(sessionId, analyzeType = 'finance') {
+  return requestJson({
+    url: '/api/analyze',
+    method: 'POST',
+    data: { sessionId, analyzeType },
+    timeout: 30000
+  })
 }
 
 function getTask(taskId) {
@@ -257,6 +332,12 @@ module.exports = {
   postStockInsight,
   postStockLLMInsight,
   postResearchAnalyze,
+  getCninfoReportList,
+  getUsReportList,
+  getReportSearchSuggest,
+  buildReportDownloadUrl,
+  postReportAiBrief,
+  postPrepareReportFromUrl,
   uploadPdf,
   startAnalyze,
   getTask,

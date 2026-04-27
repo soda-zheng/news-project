@@ -5,6 +5,10 @@ const {
   getStockDailyBars,
   postStockLLMInsight,
   postResearchAnalyze,
+  getCninfoReportList,
+  getReportSearchSuggest,
+  buildReportDownloadUrl,
+  postPrepareReportFromUrl,
   getHomeNewsEnhanced,
   getUserWatchlist,
   putUserWatchlist,
@@ -39,6 +43,112 @@ const DEFAULT_STOCK_QUICK_QUESTIONS = [
   '52周回撤下，最该盯的支撑/压力信号是什么？',
   '若继续偏弱，未持仓者如何控风险与等信号？'
 ]
+
+const EARNINGS_TYPE_TABS = [
+  { key: 'all', label: '全部' },
+  { key: 'annual', label: '年报' },
+  { key: 'q1', label: '一季报' },
+  { key: 'half', label: '中报' },
+  { key: 'q3', label: '三季报' }
+]
+
+const EARNINGS_SCENE_TABS = [
+  { key: 'finance', label: '财报尽调' },
+  { key: 'research', label: '研报观点' }
+]
+
+const T2S_CHAR_MAP = {
+  '發': '发', '佈': '布', '變': '变', '動': '动', '況': '况', '與': '与', '對': '对', '應': '应',
+  '為': '为', '務': '务', '產': '产', '業': '业', '關': '关', '鍵': '键', '數': '数', '據': '据',
+  '風': '风', '險': '险', '體': '体', '質': '质', '營': '营', '銷': '销', '額': '额', '報': '报',
+  '總': '总', '級': '级', '壓': '压', '減': '减', '價': '价', '達': '达', '實': '实', '現': '现',
+  '續': '续', '邏': '逻', '輯': '辑', '證': '证', '監': '监', '幣': '币', '萬': '万', '億': '亿',
+  '臺': '台', '這': '这', '個': '个', '題': '题', '選': '选', '擇': '择', '編': '编', '頁': '页',
+  '買': '买', '賣': '卖', '盤': '盘', '錄': '录', '經': '经', '淨': '净', '條': '条', '背': '背',
+  '後': '后', '驗': '验', '證': '证', '開': '开', '發': '发', '戰': '战', '略': '略', '顯': '显',
+  '著': '著', '佈': '布', '局': '局', '類': '类', '貢': '贡', '獻': '献', '將': '将', '來': '来',
+  '滿': '满', '擴': '扩', '張': '张', '節': '节', '點': '点', '組': '组', '織': '织', '綱': '纲',
+  '領': '领', '導': '导', '閱': '阅', '讀': '读', '檢': '检', '查': '查', '資': '资', '訊': '讯',
+  '佔': '占', '會': '会', '裡': '里', '裡': '里', '門': '门', '書': '书', '樣': '样', '勵': '励',
+  '劃': '划', '獎': '奖', '歲': '岁', '點': '点', '戶': '户', '網': '网', '區': '区',
+  '瑪': '玛', '際': '际', '團': '团', '調': '调', '潤': '润', '術': '术', '釋': '释',
+  '雜': '杂', '幹': '干'
+}
+
+function toSimpleText(raw) {
+  const s = String(raw || '')
+  if (!s) return s
+  let out = ''
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    out += T2S_CHAR_MAP[ch] || ch
+  }
+  return out
+}
+
+function normalizeFactRows(rows) {
+  const arr = Array.isArray(rows) ? rows : []
+  return arr.map((f) => ({
+    indicator: toSimpleText(f && f.indicator),
+    value: toSimpleText(f && f.value),
+    page: String((f && f.page) || ''),
+    evidence: toSimpleText(f && f.evidence)
+  }))
+}
+
+function formatEarningsStatusText(status, stage) {
+  const s = String(status || '').trim().toLowerCase()
+  const st = String(stage || '').trim()
+  const stageMap = {
+    '排队中': '任务排队中',
+    '任务已创建': '任务已创建',
+    '上传中...': '文件上传中',
+    '分析中...': '分析生成中',
+    '抽取研报事实表': '分析中（事实抽取）',
+    '理解财报': '分析中（内容理解）',
+    '理解研报': '分析中（内容理解）',
+    '生成解析': '分析中（结果生成）',
+    '生成研报观点': '分析中（观点生成）',
+    '审稿校验': '分析中（质量校验）',
+    '完成': '已完成',
+    '启动失败': '启动失败',
+    '轮询失败': '任务查询失败',
+    '失败': '分析失败'
+  }
+  if (st && stageMap[st]) return stageMap[st]
+  if (s === 'queued') return '任务排队中'
+  if (s === 'running') return '分析中'
+  if (s === 'succeeded') return '已完成'
+  if (s === 'failed') return '分析失败'
+  return st || '待开始'
+}
+
+function normalizeFileName(raw) {
+  const s = String(raw || '').trim()
+  if (!s) return '财报.pdf'
+  const cleaned = s.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_')
+  return cleaned.toLowerCase().endsWith('.pdf') ? cleaned : `${cleaned}.pdf`
+}
+
+const HK_REPORT_ALIAS = {
+  '泡泡玛特': '09992',
+  'pop mart': '09992',
+  'popmart': '09992',
+  '阿里巴巴': '09988',
+  '阿里': '09988',
+  'baba': '09988',
+  '百度': '09888',
+  'bidu': '09888',
+  '京东': '09618',
+  'jd': '09618',
+  '网易': '09999',
+  'ntes': '09999',
+  '腾讯': '00700',
+  'tencent': '00700',
+  '美团': '03690',
+  '小米': '01810'
+}
+
 
 const PORTAL_UI_THEME_KEY = 'portal_ui_theme' // system|light|dark
 const PORTAL_REMINDER_SETTINGS_KEY = 'portal_reminder_settings'
@@ -591,6 +701,18 @@ Page({
       }
     ],
     chatQuickChips: CHAT_QUICK_CHIPS,
+    earningsSceneTabs: EARNINGS_SCENE_TABS,
+    earningsScene: 'finance',
+    earningsKeyword: '',
+    earningsSuggestVisible: false,
+    earningsSuggestList: [],
+    earningsTypeTabs: EARNINGS_TYPE_TABS,
+    earningsActiveType: 'all',
+    earningsReportList: [],
+    earningsSelectedId: '',
+    earningsSelected: null,
+    earningsAiSummary: '',
+    earningsLoading: false,
     earningsVisible: false,
     earningsHtml: '',
     earningsFileName: '',
@@ -598,7 +720,7 @@ Page({
     earningsTaskId: '',
     earningsTaskStatus: '',
     earningsStage: '',
-    earningsLoading: false,
+    earningsStatusText: '',
     earningsPages: [],
     earningsPageIndex: 0,
     earningsPageBlocks: [],
@@ -830,6 +952,7 @@ Page({
     this._refreshProfile()
     this._loadWatchlist()
     this._loadHomeNewsEnhanced()
+    this._refreshEarningsReports()
   },
 
   onShow() {
@@ -841,10 +964,18 @@ Page({
 
   onHide() {
     this._stopWatchlistQuotePoll()
+    if (this._earningsSuggestTimer) {
+      clearTimeout(this._earningsSuggestTimer)
+      this._earningsSuggestTimer = null
+    }
   },
 
   onUnload() {
     this._stopWatchlistQuotePoll()
+    if (this._earningsSuggestTimer) {
+      clearTimeout(this._earningsSuggestTimer)
+      this._earningsSuggestTimer = null
+    }
   },
 
   switchPage(pageId) {
@@ -1849,6 +1980,383 @@ Page({
     wx.showToast({ title: '已添加', icon: 'success' })
   },
 
+  onEarningsKeywordInput(e) {
+    const kw = String(e.detail.value || '')
+    this.setData({ earningsKeyword: kw }, () => this._refreshEarningsSuggest())
+  },
+
+  onEarningsSceneTap(e) {
+    const key = String(e.currentTarget.dataset.key || 'finance')
+    if (key === this.data.earningsScene) return
+    this._captureAnalysisForScene(this.data.earningsScene)
+    this.setData({ earningsScene: key, earningsSuggestVisible: false }, () => {
+      this._restoreAnalysisForScene(key)
+    })
+  },
+
+  _defaultAnalysisViewState() {
+    return {
+      earningsVisible: false,
+      earningsHtml: '',
+      earningsFileName: '',
+      earningsSessionId: '',
+      earningsTaskId: '',
+      earningsTaskStatus: '',
+      earningsStage: '',
+      earningsStatusText: '',
+      earningsPages: [],
+      earningsPageIndex: 0,
+      earningsPageBlocks: [],
+      earningsFacts: [],
+      earningsFactChoices: [],
+      earningsEditChoiceIndex: 0,
+      earningsEditVisible: false,
+      earningsEditQuestion: '',
+      earningsEditBusy: false,
+      earningsLoading: false,
+    }
+  },
+
+  _captureAnalysisForScene(scene) {
+    const key = scene === 'research' ? 'research' : 'finance'
+    if (!this._analysisByScene) this._analysisByScene = { finance: null, research: null }
+    this._analysisByScene[key] = {
+      earningsVisible: !!this.data.earningsVisible,
+      earningsHtml: String(this.data.earningsHtml || ''),
+      earningsFileName: String(this.data.earningsFileName || ''),
+      earningsSessionId: String(this.data.earningsSessionId || ''),
+      earningsTaskId: String(this.data.earningsTaskId || ''),
+      earningsTaskStatus: String(this.data.earningsTaskStatus || ''),
+      earningsStage: String(this.data.earningsStage || ''),
+      earningsStatusText: String(this.data.earningsStatusText || ''),
+      earningsPages: Array.isArray(this.data.earningsPages) ? this.data.earningsPages.slice() : [],
+      earningsPageIndex: Number(this.data.earningsPageIndex || 0),
+      earningsPageBlocks: Array.isArray(this.data.earningsPageBlocks) ? this.data.earningsPageBlocks.slice() : [],
+      earningsFacts: Array.isArray(this.data.earningsFacts) ? this.data.earningsFacts.slice() : [],
+      earningsFactChoices: Array.isArray(this.data.earningsFactChoices) ? this.data.earningsFactChoices.slice() : [],
+      earningsEditChoiceIndex: Number(this.data.earningsEditChoiceIndex || 0),
+      earningsEditVisible: !!this.data.earningsEditVisible,
+      earningsEditQuestion: String(this.data.earningsEditQuestion || ''),
+      earningsEditBusy: !!this.data.earningsEditBusy,
+      earningsLoading: !!this.data.earningsLoading,
+    }
+  },
+
+  _restoreAnalysisForScene(scene) {
+    const key = scene === 'research' ? 'research' : 'finance'
+    const stored = this._analysisByScene && this._analysisByScene[key]
+    this.setData(stored || this._defaultAnalysisViewState())
+  },
+
+  _applyAnalysisPatch(scene, patch) {
+    const key = scene === 'research' ? 'research' : 'finance'
+    if (!this._analysisByScene) this._analysisByScene = { finance: null, research: null }
+    const prev = this._analysisByScene[key] || this._defaultAnalysisViewState()
+    const next = { ...prev, ...patch }
+    if (Object.prototype.hasOwnProperty.call(patch, 'earningsTaskStatus') || Object.prototype.hasOwnProperty.call(patch, 'earningsStage')) {
+      next.earningsStatusText = formatEarningsStatusText(next.earningsTaskStatus, next.earningsStage)
+    }
+    this._analysisByScene[key] = next
+    if ((this.data.earningsScene || 'finance') === key) {
+      const uiPatch = { ...patch }
+      if (Object.prototype.hasOwnProperty.call(next, 'earningsStatusText')) {
+        uiPatch.earningsStatusText = next.earningsStatusText
+      }
+      this.setData(uiPatch)
+    }
+  },
+
+
+  onRunResearchFromSelected() {
+    const selected = this.data.earningsSelected
+    if (!selected) {
+      wx.showToast({ title: '请先在“财报尽调”里选择一份报告', icon: 'none' })
+      return
+    }
+    this.onRunEarningsQuickAnalyze('research')
+  },
+
+  onEarningsTypeTap(e) {
+    const key = String(e.currentTarget.dataset.key || 'all')
+    this.setData({ earningsActiveType: key }, () => this._refreshEarningsReports(false))
+  },
+
+  onEarningsSearchTap() {
+    this.setData({ earningsSuggestVisible: false }, () => this._refreshEarningsReports(false))
+  },
+
+  onEarningsSearchFocus() {
+    const list = this.data.earningsSuggestList || []
+    if (list.length) this.setData({ earningsSuggestVisible: true })
+  },
+
+  onEarningsSearchBlur() {
+    setTimeout(() => {
+      this.setData({ earningsSuggestVisible: false })
+    }, 180)
+  },
+
+  onEarningsSuggestPick(e) {
+    const code = String(e.currentTarget.dataset.code || '').trim()
+    if (!code) return
+    this.setData(
+      {
+        earningsKeyword: code,
+        earningsSuggestVisible: false
+      },
+      () => this._refreshEarningsReports(false)
+    )
+  },
+
+  onDownloadEarningsPdf(e) {
+    const pdfUrl = String(e.currentTarget.dataset.url || '').trim()
+    const title = String(e.currentTarget.dataset.title || '').trim()
+    const symbol = String(e.currentTarget.dataset.symbol || '').trim()
+    const period = String(e.currentTarget.dataset.period || '').trim()
+    if (!pdfUrl) {
+      wx.showToast({ title: '缺少PDF链接', icon: 'none' })
+      return
+    }
+    const name = normalizeFileName(`${symbol || '财报'}_${period || title || 'report'}.pdf`)
+    const url = buildReportDownloadUrl({ pdfUrl, title, symbol, period })
+    wx.showLoading({ title: '下载中...' })
+    wx.downloadFile({
+      url,
+      timeout: 120000,
+      success: (res) => {
+        if (res.statusCode < 200 || res.statusCode >= 300 || !res.tempFilePath) {
+          wx.hideLoading()
+          wx.showToast({ title: `下载失败(${res.statusCode || '-'})`, icon: 'none' })
+          return
+        }
+        wx.saveFile({
+          tempFilePath: res.tempFilePath,
+          success: (saveRes) => {
+            wx.hideLoading()
+            const p = String(saveRes.savedFilePath || '')
+            const target = p || res.tempFilePath
+            wx.showToast({ title: '下载完成', icon: 'success' })
+            const extMatch = target.match(/\.([a-zA-Z0-9]+)(?:\?|$)/)
+            const ext = (extMatch && extMatch[1] ? extMatch[1] : 'pdf').toLowerCase()
+            const openType = ext === 'pdf' ? 'pdf' : undefined
+            wx.openDocument({
+              filePath: target,
+              fileType: openType,
+              showMenu: true,
+              fail: () => {
+                wx.showModal({
+                  title: '下载成功',
+                  content: `文件名：${name}\n保存路径：${target}`,
+                  showCancel: false
+                })
+              }
+            })
+          },
+          fail: () => {
+            wx.hideLoading()
+            wx.showToast({ title: '保存失败，请重试', icon: 'none' })
+          }
+        })
+      },
+      fail: (err) => {
+        wx.hideLoading()
+        wx.showToast({ title: formatApiError(err, '下载失败'), icon: 'none' })
+      }
+    })
+  },
+
+  onPickEarningsReport(e) {
+    const id = String(e.currentTarget.dataset.id || '')
+    const list = this.data.earningsReportList || []
+    const hit = list.find((x) => x.id === id)
+    if (!hit) return
+    const resetState = this._defaultAnalysisViewState()
+    this._analysisByScene = {
+      finance: { ...resetState },
+      research: { ...resetState }
+    }
+    this.setData({
+      earningsSelectedId: id,
+      earningsSelected: hit,
+      earningsAiSummary: '',
+      ...resetState
+    })
+  },
+
+  _deriveReportPeriodLabel(title, publishTime) {
+    const t = String(title || '')
+    const p = String(publishTime || '')
+    const yMatch = t.match(/(20\d{2})年/)
+    const year = yMatch ? yMatch[1] : (p.match(/(20\d{2})-/) || [])[1] || ''
+    if (/三季度/.test(t)) return `${year ? year + '年' : ''}三季报`
+    if (/一季度/.test(t)) return `${year ? year + '年' : ''}一季报`
+    if (/半年度|半年报|中期/.test(t)) return `${year ? year + '年' : ''}中报`
+    if (/年度报告|年报/.test(t)) return `${year ? year + '年' : ''}年报`
+    return year ? `${year}年定期报告` : '定期报告'
+  },
+
+  async _refreshEarningsReports(fromInput) {
+    if (this._earningsFetchTimer) {
+      clearTimeout(this._earningsFetchTimer)
+      this._earningsFetchTimer = null
+    }
+    const run = async () => {
+      const kw = String(this.data.earningsKeyword || '').trim()
+      const t = String(this.data.earningsActiveType || 'all')
+      const kwLower = kw.toLowerCase()
+      const hkAliasCode = HK_REPORT_ALIAS[kw] || HK_REPORT_ALIAS[kwLower] || ''
+      const stock = hkAliasCode || (/^\d{6}$/.test(kw) || /^\d{5}$/.test(kw) ? kw : '')
+      const searchkey = stock ? '' : kw
+      const column = /^\d{5}$/.test(stock) ? 'hke' : ''
+      this.setData({ earningsLoading: true })
+      try {
+        const res = await getCninfoReportList({
+          stock,
+          searchkey,
+          reportType: t,
+          column,
+          pageNum: 1,
+          pageSize: 20,
+          seDate: '2023-01-01~2030-12-31'
+        })
+        const rawItems = res && res.code === 200 && res.data && Array.isArray(res.data.items) ? res.data.items : []
+        const items = rawItems.map((x) => ({
+          ...x,
+          periodLabel: this._deriveReportPeriodLabel(x.title, x.publish_time),
+          isSummary: /摘要/.test(String(x.title || ''))
+        }))
+        const current = String(this.data.earningsSelectedId || '')
+        const keep = items.find((x) => String(x.id || '') === current)
+        const selected = keep || items[0] || null
+        this.setData({
+          earningsLoading: false,
+          earningsReportList: items,
+          earningsSelectedId: selected ? String(selected.id || '') : '',
+          earningsSelected: selected,
+          earningsAiSummary: ''
+        })
+      } catch (err) {
+        this.setData({
+          earningsLoading: false,
+          earningsReportList: [],
+          earningsSelectedId: '',
+          earningsSelected: null,
+          earningsAiSummary: `财报列表获取失败：${formatApiError(err, '请检查后端连接')}`
+        })
+      }
+    }
+    if (fromInput) {
+      this._earningsFetchTimer = setTimeout(() => {
+        this._earningsFetchTimer = null
+        void run()
+      }, 350)
+    } else {
+      await run()
+    }
+  },
+
+  _refreshEarningsSuggest() {
+    const kw = String(this.data.earningsKeyword || '').trim()
+    if (this._earningsSuggestTimer) {
+      clearTimeout(this._earningsSuggestTimer)
+      this._earningsSuggestTimer = null
+    }
+    if (!kw) {
+      this._earningsSuggestSeq = (this._earningsSuggestSeq || 0) + 1
+      this.setData({ earningsSuggestVisible: false, earningsSuggestList: [] })
+      this._refreshEarningsReports(true)
+      return
+    }
+    const reqSeq = (this._earningsSuggestSeq || 0) + 1
+    this._earningsSuggestSeq = reqSeq
+    this._earningsSuggestTimer = setTimeout(async () => {
+      this._earningsSuggestTimer = null
+      try {
+        const res = await getReportSearchSuggest(kw, 10)
+        if (this._earningsSuggestSeq !== reqSeq) return
+        const list = res && res.code === 200 && Array.isArray(res.data) ? res.data : []
+        this.setData({
+          earningsSuggestList: list,
+          earningsSuggestVisible: list.length > 0
+        })
+      } catch (e) {
+        if (this._earningsSuggestSeq !== reqSeq) return
+        this.setData({ earningsSuggestList: [], earningsSuggestVisible: false })
+      }
+    }, 300)
+  },
+
+  async onRunEarningsQuickAnalyze(analyzeType) {
+    const r = this.data.earningsSelected
+    if (!r) {
+      wx.showToast({ title: '请先选择一份财报', icon: 'none' })
+      return
+    }
+    const srcUrl = String((r.pdf_url || r.doc_url || '')).trim()
+    if (!srcUrl) {
+      wx.showToast({ title: '该条公告缺少原文链接', icon: 'none' })
+      return
+    }
+    if (!/\.pdf(\?|$)/i.test(srcUrl)) {
+      wx.showToast({ title: '该条为网页版文档，暂不支持一键解析', icon: 'none' })
+      return
+    }
+    this.setData({ earningsLoading: true, earningsAiSummary: '' })
+    try {
+      const prep = await postPrepareReportFromUrl({
+        pdfUrl: srcUrl,
+        fileName: `${r.name || r.symbol || 'report'}_${r.periodLabel || 'report'}.pdf`
+      })
+      const data = prep && prep.code === 200 && prep.data ? prep.data : null
+      const sid = data ? String(data.sessionId || '') : ''
+      if (!sid) throw new Error((prep && prep.msg) || '未获取到 sessionId')
+
+      const sceneKey = this.data.earningsScene === 'research' ? 'research' : 'finance'
+      this._applyAnalysisPatch(sceneKey, {
+        earningsVisible: true,
+        earningsFileName: (data.fileInfo && data.fileInfo.name) || `${r.name || ''}.pdf`,
+        earningsSessionId: sid,
+        earningsTaskId: '',
+        earningsTaskStatus: 'queued',
+        earningsStage: '任务已创建',
+        earningsLoading: true,
+        earningsHtml: '',
+        earningsPages: [],
+        earningsPageIndex: 0,
+        earningsPageBlocks: [],
+        earningsFacts: [],
+        earningsFactChoices: [],
+        earningsEditChoiceIndex: 0
+      })
+      const mode = String(analyzeType || (this.data.earningsScene === 'research' ? 'research' : 'finance'))
+      const st = await startAnalyze(sid, mode)
+      const tid = String(st && st.taskId ? st.taskId : '').trim()
+      if (!tid) throw new Error('taskId missing')
+      this._applyAnalysisPatch(sceneKey, { earningsTaskId: tid, earningsTaskStatus: 'running', earningsStage: '分析中...' })
+      this._pollEarningsTask(tid, sceneKey)
+    } catch (e) {
+      const msg = explainBackendConnectionError(formatApiError(e, '分析失败'))
+      const sceneKey = this.data.earningsScene === 'research' ? 'research' : 'finance'
+      this._applyAnalysisPatch(sceneKey, {
+        earningsLoading: false,
+        earningsTaskStatus: 'failed',
+        earningsStage: '启动失败',
+        earningsHtml: msg,
+        earningsAiSummary: ''
+      })
+    }
+  },
+
+  _fallbackEarningsSummary(r) {
+    return [
+      `【报告】${r.name || ''}（${r.symbol || ''}）《${r.title || r.period || '定期报告'}》`,
+      `【时间】${r.publish_time || r.publishDate || '未知'}`,
+      '【阅读顺序】先看董事会经营评述，再看三大报表，再看附注中的关键会计科目变化。',
+      '【核对清单】核对收入确认口径、毛利率变化原因、现金流与利润是否匹配、非经常性损益占比。',
+      '【风险关注】关注需求波动、费用率变化、应收与存货变化、以及管理层对后续经营展望。'
+    ].join('\n')
+  },
+
   onUploadAreaTap() {
     wx.chooseMessageFile({
       count: 1,
@@ -1883,14 +2391,17 @@ Page({
       const up = await uploadPdf(filePath, name)
       const sid = String(up && up.sessionId ? up.sessionId : '').trim()
       if (!sid) throw new Error('sessionId missing')
-      this.setData({ earningsSessionId: sid, earningsTaskStatus: 'queued', earningsStage: '任务已创建' })
-      const st = await startAnalyze(sid)
+      const sceneKey = this.data.earningsScene === 'research' ? 'research' : 'finance'
+      this._applyAnalysisPatch(sceneKey, { earningsSessionId: sid, earningsTaskStatus: 'queued', earningsStage: '任务已创建' })
+      const mode = this.data.earningsScene === 'research' ? 'research' : 'finance'
+      const st = await startAnalyze(sid, mode)
       const tid = String(st && st.taskId ? st.taskId : '').trim()
       if (!tid) throw new Error('taskId missing')
-      this.setData({ earningsTaskId: tid, earningsTaskStatus: 'running', earningsStage: '分析中...' })
-      this._pollEarningsTask(tid)
+      this._applyAnalysisPatch(sceneKey, { earningsTaskId: tid, earningsTaskStatus: 'running', earningsStage: '分析中...' })
+      this._pollEarningsTask(tid, sceneKey)
     } catch (e) {
-      this.setData({
+      const sceneKey = this.data.earningsScene === 'research' ? 'research' : 'finance'
+      this._applyAnalysisPatch(sceneKey, {
         earningsLoading: false,
         earningsTaskStatus: 'failed',
         earningsStage: '启动失败',
@@ -1899,21 +2410,21 @@ Page({
     }
   },
 
-  _pollEarningsTask(taskId) {
+  _pollEarningsTask(taskId, sceneKey) {
     const run = async () => {
       try {
         const out = await getTask(taskId)
         const status = String(out && out.status ? out.status : '')
         const stage = String(out && out.stage ? out.stage : '')
-        this.setData({ earningsTaskStatus: status, earningsStage: stage })
+        this._applyAnalysisPatch(sceneKey, { earningsTaskStatus: status, earningsStage: stage })
         if (status === 'succeeded') {
           const result = (out && out.result) || {}
-          const summary = String(result.summary || result.answer || '分析完成')
-          const pages = Array.isArray(result.pages) ? result.pages.map((x) => String(x || '')) : []
-          const facts = Array.isArray(result.facts) ? result.facts : []
+        const summary = toSimpleText(String(result.summary || result.answer || '分析完成'))
+        const pages = Array.isArray(result.pages) ? result.pages.map((x) => toSimpleText(String(x || ''))) : []
+        const facts = normalizeFactRows(result.facts)
           const factChoices = this._buildEarningsFactChoices(facts)
           const firstMd = pages[0] || ''
-          this.setData({
+          this._applyAnalysisPatch(sceneKey, {
             earningsLoading: false,
             earningsHtml: summary,
             earningsPages: pages,
@@ -1926,7 +2437,7 @@ Page({
           return
         }
         if (status === 'failed') {
-          this.setData({
+          this._applyAnalysisPatch(sceneKey, {
             earningsLoading: false,
             earningsHtml: String(out && out.error ? out.error : '分析失败'),
             earningsPages: [],
@@ -1936,7 +2447,7 @@ Page({
           return
         }
       } catch (e) {
-        this.setData({
+        this._applyAnalysisPatch(sceneKey, {
           earningsLoading: false,
           earningsTaskStatus: 'failed',
           earningsStage: '轮询失败',
@@ -2031,7 +2542,7 @@ Page({
         customQuestion: customQuestion || undefined,
         choice: choice || undefined
       })
-      const pages = Array.isArray(resp.pages) ? resp.pages.map((x) => String(x || '')) : (this.data.earningsPages || [])
+      const pages = Array.isArray(resp.pages) ? resp.pages.map((x) => toSimpleText(String(x || ''))) : (this.data.earningsPages || [])
       const nextIdx = resp.pageIndex != null ? Number(resp.pageIndex) : idx
       this.setData({ earningsPages: pages, earningsEditVisible: false })
       this._syncEarningsPageBlocks(nextIdx)

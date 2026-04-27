@@ -11,6 +11,10 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from functools import partial
 
 import requests
+try:
+    from opencc import OpenCC
+except Exception:  # pragma: no cover
+    OpenCC = None  # type: ignore
 
 try:
     from pypdf import PdfReader
@@ -24,6 +28,26 @@ _SESSIONS: dict[str, dict] = {}
 _TASKS: dict[str, dict] = {}
 _LOCK = threading.Lock()
 _POOL = ThreadPoolExecutor(max_workers=2)
+
+_CC_T2S = OpenCC("t2s") if OpenCC else None
+_T2S_FALLBACK_MAP = {
+    "發": "发", "佈": "布", "變": "变", "動": "动", "況": "况", "與": "与", "對": "对", "應": "应",
+    "為": "为", "務": "务", "產": "产", "業": "业", "關": "关", "鍵": "键", "數": "数", "據": "据",
+    "風": "风", "險": "险", "體": "体", "質": "质", "營": "营", "銷": "销", "額": "额", "報": "报",
+    "總": "总", "級": "级", "壓": "压", "減": "减", "價": "价", "達": "达", "實": "实", "現": "现",
+    "續": "续", "邏": "逻", "輯": "辑", "證": "证", "監": "监", "幣": "币", "萬": "万", "億": "亿",
+    "臺": "台", "這": "这", "個": "个", "題": "题", "選": "选", "擇": "择", "編": "编", "頁": "页",
+    "買": "买", "賣": "卖", "盤": "盘", "錄": "录", "經": "经", "淨": "净", "條": "条", "後": "后",
+    "驗": "验", "開": "开", "戰": "战", "略": "略", "顯": "显", "著": "着", "將": "将", "來": "来",
+    "滿": "满", "擴": "扩", "張": "张", "節": "节", "點": "点", "組": "组", "織": "织", "綱": "纲",
+    "領": "领", "導": "导", "閱": "阅", "讀": "读", "檢": "检", "查": "查", "資": "资", "訊": "讯",
+    "佔": "占", "會": "会", "裡": "里", "門": "门", "書": "书", "樣": "样", "勵": "励", "劃": "划",
+    "獎": "奖", "歲": "岁", "戶": "户", "網": "网", "區": "区", "雲": "云", "滙": "汇", "國": "国",
+    "龍": "龙", "專": "专", "項": "项", "債": "债", "醫": "医", "藥": "药",
+    "瑪": "玛", "際": "际", "團": "团", "調": "调", "潤": "润", "術": "术",
+    "幹": "干", "雜": "杂", "訊": "讯", "釋": "释", "壹": "壹", "貳": "贰", "參": "叁",
+    "肆": "肆", "伍": "伍", "陸": "陆", "柒": "柒", "捌": "捌", "玖": "玖", "拾": "拾",
+}
 
 
 def _get_llm_env():
@@ -88,6 +112,119 @@ def _scrub_forbidden_weipilou(s: str) -> str:
         t,
     )
     return t.replace("未披露", "需对照年报核实")
+
+
+def _to_simplified(s: str) -> str:
+    t = str(s or "")
+    if not t:
+        return t
+    try:
+        if _CC_T2S:
+            return str(_CC_T2S.convert(t))
+    except Exception:
+        pass
+    return "".join([_T2S_FALLBACK_MAP.get(ch, ch) for ch in t])
+
+
+def _simplify_facts(facts: list[dict]) -> list[dict]:
+    out = []
+    for f in facts or []:
+        if not isinstance(f, dict):
+            continue
+        out.append(
+            {
+                "indicator": _to_simplified(str(f.get("indicator") or "")),
+                "value": _to_simplified(str(f.get("value") or "")),
+                "page": str(f.get("page") or ""),
+                "evidence": _to_simplified(str(f.get("evidence") or "")),
+            }
+        )
+    return out
+
+
+def _simplify_pages_map(pages: dict[int, str]) -> dict[int, str]:
+    out: dict[int, str] = {}
+    for p, txt in (pages or {}).items():
+        try:
+            pi = int(p)
+        except Exception:
+            continue
+        out[pi] = _to_simplified(str(txt or ""))
+    return out
+
+
+def _deep_simplify_obj(obj):
+    if isinstance(obj, str):
+        return _to_simplified(obj)
+    if isinstance(obj, list):
+        return [_deep_simplify_obj(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _deep_simplify_obj(v) for k, v in obj.items()}
+    return obj
+
+
+def _safe_json_obj(content: str) -> dict:
+    obj = _extract_json_object(content) or {}
+    return obj if isinstance(obj, dict) else {}
+
+
+def _looks_like_valid_page_md(s: str) -> bool:
+    t = str(s or "").strip()
+    if not t or len(t) < 40:
+        return False
+    if t.startswith("### "):
+        return True
+    # 兼容审稿器未按 markdown 标题输出，但正文足够完整的情况
+    return ("\n" in t and ("核心结论" in t or "细节" in t or "风险" in t))
+
+
+def _question_from_choice(choice: str) -> str:
+    if not choice:
+        return ""
+    parts = [p.strip() for p in _to_simplified(str(choice)).split("｜") if p.strip()]
+    ind = parts[0] if parts else ""
+    val = ""
+    page = ""
+    for p in parts[1:]:
+        if re.fullmatch(r"P\d+", p):
+            page = p
+        elif not val:
+            val = p
+    if not ind:
+        return ""
+    suffix = f"（{page}）" if page else "（P1）"
+    if val:
+        return f"围绕「{ind}」为{val}这一变化，最关键的驱动拆解是什么？对盈利质量与后续指引的影响分别是什么{suffix}？"
+    return f"围绕本期「{ind}」披露，最关键的变化与驱动是什么？对盈利质量与风险暴露的含义分别是什么{suffix}？"
+
+
+def _fact_from_choice(choice: str, facts: list[dict]) -> dict | None:
+    if not choice:
+        return None
+    parts = [p.strip() for p in _to_simplified(str(choice)).split("｜") if p.strip()]
+    ind = parts[0] if parts else ""
+    val = ""
+    page = ""
+    for p in parts[1:]:
+        if re.fullmatch(r"P\d+", p):
+            page = p
+        elif not val:
+            val = p
+    if not ind:
+        return None
+    best = {"indicator": ind, "value": val, "page": page}
+    for f in facts or []:
+        if not isinstance(f, dict):
+            continue
+        if str(f.get("indicator") or "").strip() != ind:
+            continue
+        fp = str(f.get("page") or "").strip()
+        if page and fp and fp != page:
+            continue
+        best["value"] = str(f.get("value") or best.get("value") or "").strip()
+        best["page"] = (fp or best.get("page") or "").strip()
+        break
+    return best
 
 
 def _strip_markdown_json_fence(text: str) -> str:
@@ -273,15 +410,51 @@ def upload_file(file) -> dict | None:
     return {"sessionId": session_id, "fileInfo": {"name": name, "size": int(size)}}
 
 
-def create_task(session_id: str) -> dict | None:
+def create_session_from_pdf_url(pdf_url: str, name: str = "") -> dict:
+    url = str(pdf_url or "").strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise RuntimeError("pdfUrl 非法或为空")
+    file_name = str(name or "").strip() or os.path.basename(url.split("?", 1)[0]) or "report.pdf"
+    if not file_name.lower().endswith(".pdf"):
+        file_name = f"{file_name}.pdf"
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        )
+    }
+    r = requests.get(url, headers=headers, timeout=20)
+    r.raise_for_status()
+    content = r.content or b""
+    if not content:
+        raise RuntimeError("下载的 PDF 内容为空")
+    if not content.startswith(b"%PDF"):
+        raise RuntimeError("下载内容不是有效 PDF")
+
+    session_id = uuid.uuid4().hex
+    out_path = os.path.join(UPLOAD_DIR, f"{session_id}.pdf")
+    with open(out_path, "wb") as f:
+        f.write(content)
+    size = os.path.getsize(out_path)
+    with _LOCK:
+        _SESSIONS[session_id] = {"pdf_path": out_path, "name": file_name, "size": int(size)}
+    return {"sessionId": session_id, "fileInfo": {"name": file_name, "size": int(size)}}
+
+
+def create_task(session_id: str, analyze_type: str = "finance") -> dict | None:
     with _LOCK:
         if session_id not in _SESSIONS:
             return None
+    a_type = str(analyze_type or "finance").strip().lower()
+    if a_type not in ("finance", "research"):
+        a_type = "finance"
     task_id = uuid.uuid4().hex
     with _LOCK:
-        _TASKS[task_id] = {"status": "queued", "stage": "排队中", "error": "", "result": None}
-    _POOL.submit(_run_task, task_id, session_id)
-    return {"taskId": task_id, "engine": "finance-local", "module": "fin_report_real"}
+        _TASKS[task_id] = {"status": "queued", "stage": "排队中", "error": "", "result": None, "analyzeType": a_type}
+    _POOL.submit(_run_task, task_id, session_id, a_type)
+    module = "research_report_deep" if a_type == "research" else "fin_report_real"
+    return {"taskId": task_id, "engine": "finance-local", "module": module, "analyzeType": a_type}
 
 
 def get_task(task_id: str) -> dict | None:
@@ -306,7 +479,12 @@ def regen_page(session_id: str, page_index: int, custom_question: str = "", choi
     facts = sess.get("facts") or []
     facts = facts if isinstance(facts, list) else []
 
-    q = str(custom_question or "").strip()
+    q = _to_simplified(str(custom_question or "").strip())
+    pinned_fact = None
+    if not q and choice:
+        q = _question_from_choice(choice)
+    if choice:
+        pinned_fact = _fact_from_choice(choice, facts)
     if not q:
         # 默认沿用原题
         md = str(pages[page_index] or "")
@@ -316,9 +494,11 @@ def regen_page(session_id: str, page_index: int, custom_question: str = "", choi
     if not q:
         q = "本期业绩的核心分化点与可持续性如何评估？"
 
+    facts = _simplify_facts(facts)
     facts_ctx = json.dumps(facts[:12], ensure_ascii=False)
     prompt_a = (
         "你是严谨的卖方财报分析师。只依据下方财报文本与数据点作答，拒绝空泛结论。"
+        "【强制要求】所有输出内容必须使用简体中文，禁止使用繁体汉字，所有词汇均需转换为大陆通用简体表述。"
         "输出简洁中文，格式必须含 4 段：核心结论、细节1、细节2、关键数字/概念。"
         "每段必须提供新增信息，禁止复述上一段。"
         "全文禁止出现「未披露」三字；证据不足时请写「需对照年报核实」或「摘录中未列示该口径」。"
@@ -328,7 +508,14 @@ def regen_page(session_id: str, page_index: int, custom_question: str = "", choi
         "关键数字/概念：必须用 3-6 条列表输出，每条形如“指标｜数值｜Pxx”，不要写成一段话；"
         "每条以 “- ” 开头，行首不要写 1. 2. 等序号。"
     )
-    user_a = f"【问题】{q}\n\n【可用数据点】{facts_ctx}\n\n【财报文本】\n{tagged[:6000]}"
+    pinned_txt = ""
+    if pinned_fact and str(pinned_fact.get("indicator") or "").strip():
+        pinned_txt = (
+            f"\n【强约束数据点】{pinned_fact.get('indicator')}"
+            f"｜{pinned_fact.get('value') or ''}｜{pinned_fact.get('page') or ''}\n"
+            "必须围绕该数据点先回答，再展开风险与验证动作。"
+        )
+    user_a = f"【问题】{q}\n\n【可用数据点】{facts_ctx}{pinned_txt}\n\n【财报文本】\n{tagged[:6000]}"
     deadline = _env_float("REPORT_LLM_ANSWER_DEADLINE_SEC", 240.0)
     ans = _report_chat(
         [{"role": "system", "content": prompt_a}, {"role": "user", "content": user_a}],
@@ -338,7 +525,8 @@ def regen_page(session_id: str, page_index: int, custom_question: str = "", choi
         timeout_sec=120,
         deadline_sec=deadline,
     )
-    ans = _scrub_forbidden_weipilou(str(ans or "").strip() or "本题暂无可用解析，请稍后重试。")
+    ans = _to_simplified(_scrub_forbidden_weipilou(str(ans or "").strip() or "本题暂无可用解析，请稍后重试。"))
+    q = _to_simplified(q)
     pages[page_index] = f"### {page_index+1}. {q}\n\n{ans}"
     with _LOCK:
         if session_id in _SESSIONS:
@@ -346,7 +534,7 @@ def regen_page(session_id: str, page_index: int, custom_question: str = "", choi
     return {"pages": pages, "pageIndex": page_index}
 
 
-def _run_task(task_id: str, session_id: str):
+def _run_task(task_id: str, session_id: str, analyze_type: str = "finance"):
     def _set_stage(stage: str):
         with _LOCK:
             if task_id in _TASKS:
@@ -650,22 +838,37 @@ def _run_task(task_id: str, session_id: str):
             raise RuntimeError("PDF 文件不存在")
 
         pages_map = _extract_pdf_pages(pdf_path)
+        pages_map = _simplify_pages_map(pages_map)
         tagged = _build_page_tagged_text(pages_map, max_chars=20000)
         if not tagged:
             raise RuntimeError("未提取到可读 PDF 文本（可能是扫描件或加密 PDF）")
 
-        _set_stage("理解财报")
+        is_research = str(analyze_type or "finance").strip().lower() == "research"
+
+        _set_stage("理解研报" if is_research else "理解财报")
         understand_cap = _env_int("REPORT_LLM_UNDERSTAND_INPUT_CHARS", 16000)
         tagged_u = tagged[:understand_cap] if (understand_cap >= 4000 and len(tagged) > understand_cap) else tagged
         u_deadline = _env_float("REPORT_LLM_UNDERSTAND_DEADLINE_SEC", 300.0)
-        prompt_understand = (
-            "你是资深卖方（A/H 股）财报分析师。基于下方带页码标注的财报摘录生成结构化结果。\n"
-            "只输出 JSON 对象，键包括 summary、disclosed_facts。\n"
-            "summary: 140-240 字中文，必须包含：报告期/业务变化一句话 + 1 个关键驱动 + 1 个关键风险/不确定性；"
-            "全文禁止出现「未披露」三字，可用「需对照年报核实」「摘录中未列示该口径」等表述。\n"
-            "disclosed_facts: 最多 24 条，元素形如 {indicator,value,page,evidence}，page 用 Pxx，evidence 为原文极短摘录（尽量含数字/口径）。\n"
-            "不要输出 questions。\n"
-        )
+        if is_research:
+            prompt_understand = (
+                "你是资深卖方研究员。基于下方带页码标注的研报摘录生成结构化结果。\n"
+                "【强制要求】所有输出内容必须使用简体中文，禁止使用繁体汉字，所有词汇均需转换为大陆通用简体表述。\n"
+                "只输出 JSON 对象，键包括 summary、disclosed_facts。\n"
+                "summary: 160-260 字中文，概括机构观点方向、评级变化（若有）、核心假设与主要风险；"
+                "全文禁止出现「未披露」三字，可用「需对照原文核实」「摘录中未列示该口径」等表述。\n"
+                "disclosed_facts: 最多 24 条，元素形如 {indicator,value,page,evidence}，page 用 Pxx，evidence 为原文极短摘录（尽量含评级/目标价/预测数字）。\n"
+                "不要输出 questions。\n"
+            )
+        else:
+            prompt_understand = (
+                "你是资深卖方（A/H 股）财报分析师。基于下方带页码标注的财报摘录生成结构化结果。\n"
+                "【强制要求】所有输出内容必须使用简体中文，禁止使用繁体汉字，所有词汇均需转换为大陆通用简体表述。\n"
+                "只输出 JSON 对象，键包括 summary、disclosed_facts。\n"
+                "summary: 140-240 字中文，必须包含：报告期/业务变化一句话 + 1 个关键驱动 + 1 个关键风险/不确定性；"
+                "全文禁止出现「未披露」三字，可用「需对照年报核实」「摘录中未列示该口径」等表述。\n"
+                "disclosed_facts: 最多 24 条，元素形如 {indicator,value,page,evidence}，page 用 Pxx，evidence 为原文极短摘录（尽量含数字/口径）。\n"
+                "不要输出 questions。\n"
+            )
         summary = ""
         facts_model = []
         try:
@@ -678,39 +881,95 @@ def _run_task(task_id: str, session_id: str):
                 deadline_sec=u_deadline,
             )
             obj_u = _extract_json_object(content_u) or {}
-            summary = _scrub_forbidden_weipilou(str(obj_u.get("summary") or "").strip())
+            summary = _to_simplified(_scrub_forbidden_weipilou(str(obj_u.get("summary") or "").strip()))
             facts_model = obj_u.get("disclosed_facts") if isinstance(obj_u.get("disclosed_facts"), list) else []
         except Exception as e:
-            _set_stage("理解财报(降级)")
-            summary = _scrub_forbidden_weipilou(f"理解阶段超时/异常，已降级继续解析：{str(e)[:220]}")
+            _set_stage("理解阶段(降级)")
+            summary = _to_simplified(_scrub_forbidden_weipilou(f"理解阶段超时/异常，已降级继续解析：{str(e)[:220]}"))
             facts_model = []
 
         facts_rule = _extract_rule_based_facts(pages_map, max_per_page=28, max_total=200)
-        facts = _sanitize_facts([*(facts_model or []), *(facts_rule or [])], max_total=220)
-        questions = _build_questions_from_facts(facts, n=5)
+        facts = _simplify_facts(_sanitize_facts([*(facts_model or []), *(facts_rule or [])], max_total=220))
+        fact_sheet = {}
+        if is_research:
+            _set_stage("抽取研报事实表")
+            fact_prompt = (
+                "你是财报/研报事实抽取器。只依据输入文本抽取事实，不允许脑补。"
+                "只输出 JSON 对象，键必须包括：company, rating_view, rating_change, "
+                "target_price, valuation_method, forecast, drivers, risks, catalysts, evidence_rules。"
+                "其中 forecast 为数组，元素包含 metric,value,unit,period,yoy,page,quote；"
+                "drivers/risks/catalysts 为数组，元素包含 item,page,quote；"
+                "缺失值用空字符串，不要省略键。"
+            )
+            try:
+                fact_raw = _report_chat(
+                    [{"role": "system", "content": fact_prompt}, {"role": "user", "content": tagged_u[:12000]}],
+                    max_tokens=1800,
+                    temperature=0.1,
+                    json_mode=True,
+                    timeout_sec=120,
+                    deadline_sec=max(120.0, u_deadline),
+                )
+                fact_sheet = _deep_simplify_obj(_safe_json_obj(fact_raw))
+            except Exception:
+                fact_sheet = {}
+        questions = (
+            [
+                "机构到底在说什么（看多/中性/看空）？投资评级是否变化（上调/下调）？",
+                "收入、利润、EPS 的预测（今年/明年）是什么？目标价与估值方法（PE/DCF）是什么？与上一版相比是否调整？",
+                "投资逻辑主线是什么（量/价/结构/成本/份额）？哪些假设是关键前提、最容易失效？",
+                "下行风险与上行催化分别是什么？请按影响程度排序并说明触发条件。",
+                "请做可信度校验：观点是否有页码证据支持？与最新财报是否一致？给出高/中/低可信度及原因。"
+            ]
+            if is_research
+            else _build_questions_from_facts(facts, n=5)
+        )
         if not summary:
-            summary = "财报解析完成：建议优先核对盈利增速、现金流质量与费用结构变化。"
-        summary = _scrub_forbidden_weipilou(summary)
+            summary = (
+                "研报观点解析完成：建议重点核对评级变化、预测调整与关键风险假设。"
+                if is_research
+                else "财报解析完成：建议优先核对盈利增速、现金流质量与费用结构变化。"
+            )
+        summary = _to_simplified(_scrub_forbidden_weipilou(summary))
 
-        _set_stage("生成解析")
+        _set_stage("生成研报观点" if is_research else "生成解析")
         pages_out = []
         facts_ctx = json.dumps(facts[:12], ensure_ascii=False)
+        fact_sheet_ctx = json.dumps(fact_sheet, ensure_ascii=False) if fact_sheet else "{}"
         a_deadline = _env_float("REPORT_LLM_ANSWER_DEADLINE_SEC", 240.0)
         for i, q in enumerate(questions):
             _set_stage(f"生成解析 Q{i+1}/{len(questions)}")
             prompt_a = (
-                "你是严谨的卖方财报分析师。只依据下方财报文本与数据点作答，拒绝空泛结论。"
-                "输出简洁中文，格式必须含 4 段：核心结论、细节1、细节2、关键数字/概念。"
-                "每段必须提供新增信息，禁止复述上一段。"
-                "全文禁止出现「未披露」三字；证据不足时请写「需对照年报核实」或「摘录中未列示该口径」。"
-                "可引用 Pxx 页码辅助定位；勿在【问题】行或用户可见标题里写页码。"
-                "细节1：拆解驱动（量/价/结构/成本/一次性）至少 1 条，并给证据页码。"
-                "细节2：给出反证/风险与验证动作（需要再核对的表或指标），并给线索页码。"
-                "关键数字/概念：必须用 3-6 条列表输出，每条形如“指标｜数值｜Pxx”，不要写成一段话；"
-                "每条以 “- ” 开头，行首不要写 1. 2. 等序号。"
+                (
+                    "你是严谨的卖方研报分析师。只依据下方研报文本与数据点作答，拒绝空泛结论。"
+                    "【强制要求】所有输出内容必须使用简体中文，禁止使用繁体汉字，所有词汇均需转换为大陆通用简体表述。"
+                    "输出必须含 5 段：核心结论、证据页码、风险/催化、与财报一致性、可信度分层。"
+                    "每段必须提供新增信息，禁止复述上一段。"
+                    "全文禁止出现「未披露」三字；证据不足时请写「需对照原文核实」或「摘录中未列示该口径」。"
+                    "可信度分层必须给出：高/中/低其一 + 原因。"
+                    "关键数字必须用 3-6 条列表输出，每条形如“指标｜数值｜Pxx”；行首不要写 1.2. 序号。"
+                )
+                if is_research
+                else (
+                    "你是严谨的卖方财报分析师。只依据下方财报文本与数据点作答，拒绝空泛结论。"
+                    "【强制要求】所有输出内容必须使用简体中文，禁止使用繁体汉字，所有词汇均需转换为大陆通用简体表述。"
+                    "输出简洁中文，格式必须含 4 段：核心结论、细节1、细节2、关键数字/概念。"
+                    "每段必须提供新增信息，禁止复述上一段。"
+                    "全文禁止出现「未披露」三字；证据不足时请写「需对照年报核实」或「摘录中未列示该口径」。"
+                    "可引用 Pxx 页码辅助定位；勿在【问题】行或用户可见标题里写页码。"
+                    "细节1：拆解驱动（量/价/结构/成本/一次性）至少 1 条，并给证据页码。"
+                    "细节2：给出反证/风险与验证动作（需要再核对的表或指标），并给线索页码。"
+                    "关键数字/概念：必须用 3-6 条列表输出，每条形如“指标｜数值｜Pxx”，不要写成一段话；"
+                    "每条以 “- ” 开头，行首不要写 1. 2. 等序号。"
+                )
             )
-            q_show = _scrub_forbidden_weipilou(_strip_question_page_markers(q))
-            user_a = f"【问题】{q_show}\n\n【可用数据点】{facts_ctx}\n\n【财报文本】\n{tagged[:6000]}"
+            q_show = _to_simplified(_scrub_forbidden_weipilou(_strip_question_page_markers(q)))
+            user_a = (
+                f"【问题】{q_show}\n\n【可用数据点】{facts_ctx}\n\n"
+                f"【事实表】{fact_sheet_ctx}\n\n【财报文本】\n{tagged[:6000]}"
+                if is_research
+                else f"【问题】{q_show}\n\n【可用数据点】{facts_ctx}\n\n【财报文本】\n{tagged[:6000]}"
+            )
             ans = _report_chat(
                 [{"role": "system", "content": prompt_a}, {"role": "user", "content": user_a}],
                 max_tokens=900,
@@ -719,20 +978,98 @@ def _run_task(task_id: str, session_id: str):
                 timeout_sec=120,
                 deadline_sec=a_deadline,
             )
-            ans = _scrub_forbidden_weipilou(str(ans or "").strip() or "本题暂无可用解析，请稍后重试。")
+            ans = _to_simplified(_scrub_forbidden_weipilou(str(ans or "").strip() or "本题暂无可用解析，请稍后重试。"))
             pages_out.append(f"### {i+1}. {q_show}\n\n{ans}")
             time.sleep(_env_float("REPORT_LLM_PACING_SEC", 0.65))
+
+        audit_result = {}
+        if is_research:
+            _set_stage("审稿校验")
+            audit_prompt = (
+                "你是审稿纠错器。只依据【事实表】和【回答草稿】检查错误。"
+                "检查：数字/单位/同比/页码是否一致；是否出现繁体字；是否有无证据推断。"
+                "输出 JSON：issues(数组，每项含type,detail,severity)，"
+                "corrected_summary(字符串)，corrected_pages(数组字符串)。"
+                "若草稿无明显错误，issues 返回空数组，corrected_* 保持原文。"
+            )
+            draft_summary = summary
+            draft_pages = pages_out
+            try:
+                audit_raw = _report_chat(
+                    [
+                        {"role": "system", "content": audit_prompt},
+                        {
+                            "role": "user",
+                            "content": (
+                                f"【事实表】{fact_sheet_ctx}\n\n"
+                                f"【回答草稿-摘要】{draft_summary}\n\n"
+                                f"【回答草稿-逐题】{json.dumps(draft_pages, ensure_ascii=False)}"
+                            ),
+                        },
+                    ],
+                    max_tokens=1400,
+                    temperature=0.0,
+                    json_mode=True,
+                    timeout_sec=120,
+                    deadline_sec=max(120.0, a_deadline),
+                )
+                audit_result = _deep_simplify_obj(_safe_json_obj(audit_raw))
+                corrected_summary = str(audit_result.get("corrected_summary") or "").strip()
+                corrected_pages = audit_result.get("corrected_pages")
+                if corrected_summary and len(corrected_summary) >= 30:
+                    summary = _to_simplified(_scrub_forbidden_weipilou(corrected_summary))
+                if isinstance(corrected_pages, list) and corrected_pages:
+                    candidate_pages = [
+                        _to_simplified(_scrub_forbidden_weipilou(str(x or "")))
+                        for x in corrected_pages
+                    ]
+                    valid_count = sum(1 for x in candidate_pages if _looks_like_valid_page_md(x))
+                    # 只有当审稿返回页数和原题数一致、且大部分内容看起来是完整答案时才覆盖。
+                    if len(candidate_pages) == len(pages_out) and valid_count >= max(1, len(pages_out) - 1):
+                        pages_out = candidate_pages
+            except Exception:
+                audit_result = {}
 
         result = {
             "summary": summary,
             "sessionId": session_id,
+            "analyzeType": "research" if is_research else "finance",
             "questions": [
-                {"category": "财务分析", "question": _scrub_forbidden_weipilou(_strip_question_page_markers(q))}
+                {
+                    "category": "研报观点" if is_research else "财务分析",
+                    "question": _to_simplified(_scrub_forbidden_weipilou(_strip_question_page_markers(q))),
+                }
                 for q in questions
             ],
             "pages": pages_out,
             "facts": facts[:80] if isinstance(facts, list) else [],
         }
+        if is_research:
+            # 研报专用结构化输出：便于前端按模块渲染，不与财报同构文案混用。
+            blocks = [
+                "viewpoint_conclusion",
+                "forecast_valuation",
+                "logic_hypothesis",
+                "risk_catalyst",
+                "credibility_check",
+            ]
+            research_blocks = {}
+            for i, key in enumerate(blocks):
+                q_txt = ""
+                if i < len(result.get("questions") or []):
+                    q_obj = (result.get("questions") or [])[i]
+                    if isinstance(q_obj, dict):
+                        q_txt = str(q_obj.get("question") or "")
+                a_txt = ""
+                if i < len(pages_out):
+                    a_txt = str(pages_out[i] or "")
+                research_blocks[key] = {"question": q_txt, "answer": a_txt}
+            result["researchBlocks"] = research_blocks
+            result["researchSchemaVersion"] = "v1"
+            result["factSheet"] = fact_sheet if isinstance(fact_sheet, dict) else {}
+            result["qualityAudit"] = audit_result if isinstance(audit_result, dict) else {}
+            # 研报模式再做一次全量繁转简兜底，避免任何字段漏转。
+            result = _deep_simplify_obj(result)
         with _LOCK:
             if session_id in _SESSIONS:
                 _SESSIONS[session_id]["facts"] = result.get("facts") or []
