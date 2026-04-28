@@ -1212,6 +1212,23 @@ Page({
     })
   },
 
+  onTopicStockTap(e) {
+    const rawCode = String((e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.code) || '').trim()
+    const rawName = String((e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.name) || '').trim()
+    const key =
+      normalizeToAshare6(rawCode) ||
+      resolveStockKey(rawCode) ||
+      normalizeToAshare6(rawName) ||
+      resolveStockKey(rawName) ||
+      ''
+    if (!isAshare6digit(key)) {
+      wx.showToast({ title: '该标的暂仅支持沪深京A股（6位代码）', icon: 'none', duration: 2400 })
+      return
+    }
+    this._commitStockKey(key)
+    this.switchPage('stock')
+  },
+
   onTopicNoteBodyInput(e) {
     this.setData({ topicNoteBody: e.detail.value })
   },

@@ -103,7 +103,14 @@
 
       <view class="card">
         <view class="core-title">📊 核心标的</view>
-        <view class="stock-row" wx:for="{{topicDetail.stocks}}" wx:key="code">
+        <view
+          class="stock-row"
+          wx:for="{{topicDetail.stocks}}"
+          wx:key="code"
+          bindtap="onTopicStockTap"
+          data-code="{{item.code}}"
+          data-name="{{item.name}}"
+        >
           <view>
             <text class="stock-name-inline">{{item.name}}</text>
             <text class="text-small"> {{item.code}}</text>
